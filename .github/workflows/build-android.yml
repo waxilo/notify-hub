@@ -55,9 +55,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest \
-            android/app/build/outputs/apk/debug/app-debug.apk \
-            --title "Android APK v1.0.${{ github.run_number }}" \
-            --notes "CI 自动构建的调试版 APK（run ${{ github.run_number }}），可直接下载安装。
+          for i in 1 2 3; do
+            sleep 3
+            gh release create latest \
+              android/app/build/outputs/apk/debug/app-debug.apk \
+              --title "Android APK v1.0.${{ github.run_number }}" \
+              --notes "CI 自动构建的调试版 APK（run ${{ github.run_number }}），可直接下载安装。
           VERSION_CODE=${{ github.run_number }}
-          VERSION_NAME=1.0.${{ github.run_number }}"
+          VERSION_NAME=1.0.${{ github.run_number }}" && break
+            gh release delete latest --yes --cleanup-tag || true
+          done
+          # 兜底：若 create 竞态产生草稿 Release，强制发布为正式版
+          gh release edit latest --draft=false || true
