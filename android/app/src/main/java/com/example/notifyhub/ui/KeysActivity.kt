@@ -49,12 +49,17 @@ class KeysActivity : AppCompatActivity() {
         LogHelper.append(this, "KeysActivity onCreate")
 
         // 收件箱移除后由首页负责拉起前台推送服务，保证 WS 实时推送在线
-        val svc = Intent(this, com.example.notifyhub.data.PushService::class.java)
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(svc) else startService(svc)
-            LogHelper.append(this, "startForegroundService ok")
-        } catch (e: Exception) {
-            LogHelper.append(this, "startForegroundService failed: ${e.javaClass.simpleName}: ${e.message}")
+        // 无登录态时不拉起（退出登录后残留任务栈可能再次进入本页）
+        if (com.example.notifyhub.data.TokenStore(this).token.isNullOrBlank()) {
+            LogHelper.append(this, "no token -> skip startForegroundService")
+        } else {
+            val svc = Intent(this, com.example.notifyhub.data.PushService::class.java)
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(svc) else startService(svc)
+                LogHelper.append(this, "startForegroundService ok")
+            } catch (e: Exception) {
+                LogHelper.append(this, "startForegroundService failed: ${e.javaClass.simpleName}: ${e.message}")
+            }
         }
         // Android 13+ 动态请求通知权限
         if (android.os.Build.VERSION.SDK_INT >= 33 &&

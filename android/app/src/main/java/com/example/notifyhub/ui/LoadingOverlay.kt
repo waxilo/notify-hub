@@ -13,19 +13,39 @@ class LoadingOverlay(activity: Activity) {
     private var overlay: ViewGroup? = null
     private var count = 0
 
+    private val alive: Boolean
+        get() = try {
+            !activityRef.isFinishing &&
+                !(android.os.Build.VERSION.SDK_INT >= 17 && activityRef.isDestroyed)
+        } catch (_: Throwable) {
+            false
+        }
+
+    // 退出登录 / 401 跳登录时 Activity 可能已销毁，而 hide() 常在协程 finally 里执行；
+    // 对已销毁页面操作 View 会抛 IllegalArgumentException 并杀进程，故全部静默容错
     fun show() {
-        count++
-        if (count > 1 || overlay != null) return
-        val content = activityRef.findViewById<FrameLayout>(android.R.id.content)
-        overlay = activityRef.layoutInflater.inflate(R.layout.view_loading, content, false) as ViewGroup
-        content.addView(overlay)
+        try {
+            if (!alive) return
+            count++
+            if (count > 1 || overlay != null) return
+            val content = activityRef.findViewById<FrameLayout>(android.R.id.content)
+            overlay = activityRef.layoutInflater.inflate(R.layout.view_loading, content, false) as ViewGroup
+            content.addView(overlay)
+        } catch (_: Throwable) {
+            overlay = null
+        }
     }
 
     fun hide() {
-        count = (count - 1).coerceAtLeast(0)
-        if (count == 0) {
-            overlay?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        try {
+            count = (count - 1).coerceAtLeast(0)
+            if (count == 0) {
+                overlay?.let { (it.parent as? ViewGroup)?.removeView(it) }
+                overlay = null
+            }
+        } catch (_: Throwable) {
             overlay = null
+            count = 0
         }
     }
 }

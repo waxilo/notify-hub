@@ -40,9 +40,15 @@ class PushService : Service() {
     override fun onCreate() {
         super.onCreate()
         ensureChannel()
-        // 系统在后台重启 START_STICKY 服务时，Android 12+ 可能抛
-        // ForegroundServiceStartNotAllowedException：必须兜底 stopSelf，否则进程反复崩溃，
-        // 表现为 App 闪退且连登录页都进不去
+        // 根因修复（v1.0.39 起退出登录后闪退）：
+        // 退出登录后 token 已清空，但 START_STICKY 服务仍会被系统反复重启；
+        // 后台进程调用 startForeground 会被 Android 12+ 拒绝并杀进程，形成崩溃循环。
+        // 因此：无登录态时根本不尝试前台化，直接停止
+        if (TokenStore(this).token.isNullOrBlank()) {
+            LogHelper.append(this, "PushService onCreate: no token -> stopSelf (skip foreground)")
+            stopSelf()
+            return
+        }
         try {
             startForeground(FOREGROUND_ID, buildForegroundNotification())
             LogHelper.append(this, "PushService startForeground ok")
@@ -57,6 +63,12 @@ class PushService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         LogHelper.append(this, "PushService onStartCommand")
+        // 已退出登录：不重连，且返回 START_NOT_STICKY，阻止系统再次拉起（切断崩溃循环）
+        if (TokenStore(this).token.isNullOrBlank()) {
+            LogHelper.append(this, "no token -> stopSelf, START_NOT_STICKY")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         // 重新登录后再次 startService：重置鉴权失败标记并在未连接时重新 connect
         if (authFailed) {
             authFailed = false
