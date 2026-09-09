@@ -142,7 +142,18 @@ function renderDocs() {
 requests.post('${API_BASE}/hook/<KEY>', json={
     'message': 'CPU 使用率超过 90%',
 })`,
-    // 5: 响应
+    // 5: 自定义模板
+    `// key 设为「自定义（模板解析）」后，POST 这份 JSON：
+{
+  "message": "\u0024{name} 的年龄是 \u0024{age} 岁",
+  "name": "wxl",
+  "age": "18"
+}
+// 手机收到的通知内容：wxl 的年龄是 18 岁
+//
+// 不传 message 时，整个 JSON 直接作为通知内容：
+{ "event": { "name": "CPU 告警", "value": "92%" } }`,
+    // 6: 响应
     `{ "ok": true, "id": 71 }                      // 正常入库并推送
 { "ok": true, "id": 72, "empty": true }        // message 为空：只入库不推送（历史显示「空消息」）
 { "ok": true, "deduplicated": true, "id": 70 } // 显式 dedup_key 重复，未重复推送
@@ -180,7 +191,14 @@ requests.post('${API_BASE}/hook/<KEY>', json={
     </div>
 
     <div class="card doc-card">
-      <h2><span class="doc-num">3</span>响应与防重</h2>
+      <h2><span class="doc-num">3</span>自定义模式 · 模板解析</h2>
+      <p class="hint">在「Key 管理 → ⋯ → 编辑」中把 key 切为「自定义（模板解析）」后，message 不再原样发送，而是作为<b>模板</b>：<code>$&#123;字段&#125;</code> 占位符会用 JSON 数据里的对应字段填充。适合监控、CI 等推送结构化 JSON 的场景。</p>
+      <div class="doc-code"><code>${escapeHtml(samples[5])}</code><button class="btn mini doc-copy">复制</button></div>
+      <p class="hint">路径语法：点分路径、数组用下标（<code>$&#123;event.alerts.0.name&#125;</code>），取不到的字段替换为空串。<b>未传 message 时</b>，整个 JSON 会直接作为通知内容触达，调用方无需任何改造。</p>
+    </div>
+
+    <div class="card doc-card">
+      <h2><span class="doc-num">4</span>响应与防重</h2>
       <div class="doc-code"><code>${escapeHtml(samples[6])}</code><button class="btn mini doc-copy">复制</button></div>
       <p class="hint"><b>防重语义</b>：服务端默认每条消息互不重复（不做内容去重）。只有当调用方显式传了 <code>dedup_key</code> 时才做去重——适合「发送超时后重试」的场景，避免重试导致重复弹通知。每条消息都会携带唯一防重 key 下发给 App，用于识别服务端重推。</p>
     </div>`;
@@ -265,7 +283,7 @@ async function loadList() {
         <div class="key-main">
           <span class="key-name">${escapeHtml(k.name)}</span>
           <span class="badge ${k.active ? 'on' : 'off'}">${k.active ? '启用中' : '已停用'}</span>
-          <span class="badge mode">默认</span>
+          <span class="badge mode">${k.mode === 'custom' ? '自定义' : '默认'}</span>
           <code class="key-url">${escapeHtml(k.keyFull || k.key)}</code>
           <button class="key-more" data-more="${k.id}" aria-label="操作菜单">⋯</button>
         </div>
@@ -351,7 +369,12 @@ function openKeyEdit(k) {
       <form id="edit-form">
         <label>名称</label>
         <input name="name" value="${escapeHtml(k.name)}" required />
-        <p class="hint">通知标题固定为 key 名称，调用只需传 message 参数。</p>
+        <label>推送模式</label>
+        <div class="seg">
+          <label class="seg-item"><input type="radio" name="mode" value="default" ${k.mode !== 'custom' ? 'checked' : ''}/><span>默认</span></label>
+          <label class="seg-item"><input type="radio" name="mode" value="custom" ${k.mode === 'custom' ? 'checked' : ''}/><span>自定义（模板解析）</span></label>
+        </div>
+        <p class="hint">默认：message 原样作为通知内容。自定义：message 作为模板，<code>$&#123;字段&#125;</code> 占位符用 JSON 数据填充（如 $&#123;name&#125;、$&#123;event.msg&#125;，点分路径、数组用下标）；未传 message 时整个 JSON 直接作为内容。</p>
         <label class="check-row"><input type="checkbox" name="active" ${k.active ? 'checked' : ''}/> 启用此 key（停用后 webhook 调用将被拒绝，不推送消息）</label>
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="edit-cancel">取消</button>
@@ -370,6 +393,7 @@ function openKeyEdit(k) {
       await api.updateKey(k.id, {
         name: form.name.value.trim(),
         active: form.active.checked,
+        mode: form.mode.value,
       });
       root_.innerHTML = '';
       loadList();

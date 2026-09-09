@@ -2,7 +2,10 @@
 //   GET  /hook/:key?message=...[&dedup_key=...]
 //   POST /hook/:key  (JSON | form | 纯文本；防重 key 可用头 X-Dedup-Key 或字段 dedup_key)
 // 标题固定为 key 名称（key_name），调用方不需要传 title；通知内容统一取 message。
-// message 为空时只入库不推送（历史中展示为「空消息」）。
+// 默认模式：message 原样作为内容。
+// 自定义模式：message 作为模板，${路径} 占位符用 JSON 数据填充（如 ${name}、${event.msg}）；
+//   未传 message 时整个 JSON 直接作为内容触达。
+// message 解析为空时只入库不推送（历史中展示为「空消息」）。
 // 防重：仅在调用方显式传入 dedup_key 时做去重（用于调用方超时重试场景），
 // 同一 dedup_key 在 5 分钟窗口内只入库/推送一次，重复调用直接返回首条消息 id（deduplicated: true）。
 // 每条消息未传 dedup_key 时由服务端生成唯一 key（srv-<uuid>），随 WS 推送下发，供 App 对重推消息判重。
@@ -10,8 +13,33 @@ import { json, readJson, readText } from './utils.js';
 
 const DEDUP_WINDOW_MS = 300_000;
 
+// 按点分路径从 JSON 提取值，支持数组下标与 $ 前缀：$.event.alerts.0.title（$ 表示 JSON 本身，可省略）
+function extractByPath(obj, path) {
+  if (!path || obj == null) return '';
+  let p = String(path).trim();
+  if (p === '$') return JSON.stringify(obj);
+  if (p.startsWith('$')) p = p.slice(1);
+  if (p.startsWith('.')) p = p.slice(1);
+  if (!p) return JSON.stringify(obj);
+  let cur = obj;
+  for (const seg of p.split('.')) {
+    if (cur == null) return '';
+    if (Array.isArray(cur)) {
+      const i = parseInt(seg, 10);
+      if (Number.isNaN(i)) return '';
+      cur = cur[i];
+    } else if (typeof cur === 'object') {
+      cur = cur[seg];
+    } else {
+      return '';
+    }
+  }
+  if (cur == null) return '';
+  return typeof cur === 'object' ? JSON.stringify(cur) : String(cur);
+}
+
 export async function handleWebhook(request, env, key) {
-  const row = await env.DB.prepare('SELECT id, name, user_id, active FROM keys WHERE key=?').bind(key).first();
+  const row = await env.DB.prepare('SELECT id, name, user_id, active, mode FROM keys WHERE key=?').bind(key).first();
   if (!row) return json({ error: 'invalid key' }, 404);
   // 禁用状态的 key 不接收、不入库、不推送
   if (!row.active) return json({ error: 'key is disabled' }, 403);
@@ -20,22 +48,24 @@ export async function handleWebhook(request, env, key) {
   let title = row.name || '通知';
   let body = '';
   let payload = null;
+  let payloadObj = null;
   let dedupKey = request.headers.get('x-dedup-key') || '';
 
   if (request.method === 'POST') {
     const ct = (request.headers.get('content-type') || '').toLowerCase();
     try {
       if (ct.includes('application/json')) {
-        const data = await request.json();
-        body = String(data.message ?? '');
-        dedupKey = dedupKey || String(data.dedup_key ?? '');
-        payload = JSON.stringify(data);
+        payloadObj = await request.json();
+        body = String(payloadObj.message ?? '');
+        dedupKey = dedupKey || String(payloadObj.dedup_key ?? '');
+        payload = JSON.stringify(payloadObj);
       } else if (ct.includes('application/x-www-form-urlencoded') || ct.includes('multipart/form-data')) {
         const form = await request.formData();
-        body = String(form.get('message') ?? '');
-        dedupKey = dedupKey || String(form.get('dedup_key') ?? '');
         const obj = {};
         for (const [k, v] of form.entries()) obj[k] = v;
+        payloadObj = obj;
+        body = String(form.get('message') ?? '');
+        dedupKey = dedupKey || String(form.get('dedup_key') ?? '');
         payload = JSON.stringify(obj);
       } else {
         body = await request.text();
@@ -47,13 +77,24 @@ export async function handleWebhook(request, env, key) {
     }
   } else {
     const url = new URL(request.url);
-    body = url.searchParams.get('message') || '';
-    dedupKey = dedupKey || url.searchParams.get('dedup_key') || '';
     const obj = {};
     for (const [k, v] of url.searchParams.entries()) obj[k] = v;
+    payloadObj = obj;
+    body = url.searchParams.get('message') || '';
+    dedupKey = dedupKey || url.searchParams.get('dedup_key') || '';
     payload = JSON.stringify(obj);
   }
 
+  // 自定义模式：
+  //   1) 传了 message → 作为模板，${路径} 占位符用 JSON 数据填充（取不到的字段替换为空串）
+  //   2) 未传 message → 整个 JSON 直接作为内容触达
+  if (row.mode === 'custom' && payloadObj && typeof payloadObj === 'object') {
+    if (body) {
+      body = body.replace(/\$\{([^}]+)\}/g, (_, p) => extractByPath(payloadObj, p));
+    } else {
+      body = JSON.stringify(payloadObj);
+    }
+  }
 
   if (!title) title = '通知';
   if (title.length > 500) title = title.slice(0, 500);

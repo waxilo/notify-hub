@@ -9,6 +9,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.RadioButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -121,13 +122,16 @@ class KeysActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- 编辑弹窗：名称 / 启停 ----------
+    // ---------- 编辑弹窗：名称 / 模式 / 启停 ----------
     private fun openEdit(k: KeyItem) {
         val view = layoutInflater.inflate(R.layout.dialog_edit_key, null)
         val etName = view.findViewById<EditText>(R.id.etName)
+        val rbDefault = view.findViewById<RadioButton>(R.id.rbModeDefault)
+        val rbCustom = view.findViewById<RadioButton>(R.id.rbModeCustom)
         val cbActive = view.findViewById<CheckBox>(R.id.cbActive)
 
         etName.setText(k.name)
+        if (k.mode == "custom") rbCustom.isChecked = true else rbDefault.isChecked = true
         cbActive.isChecked = k.active == 1
 
         val dialog = AlertDialog.Builder(this)
@@ -150,7 +154,8 @@ class KeysActivity : AppCompatActivity() {
                             k.id,
                             UpdateKeyReq(
                                 name = name,
-                                active = cbActive.isChecked
+                                active = cbActive.isChecked,
+                                mode = if (rbCustom.isChecked) "custom" else "default"
                             )
                         )
                     }

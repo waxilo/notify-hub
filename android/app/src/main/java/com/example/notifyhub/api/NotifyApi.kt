@@ -20,7 +20,8 @@ data class ChangePwReq(val oldPassword: String, val newPassword: String)
 data class CreateKeyReq(val name: String = "default")
 data class UpdateKeyReq(
     val name: String? = null,
-    val active: Boolean? = null
+    val active: Boolean? = null,
+    val mode: String? = null
 )
 data class KeyResp(val id: Long, val key: String, val name: String, val createdAt: Long)
 data class KeyItem(
@@ -30,7 +31,8 @@ data class KeyItem(
     val keyFull: String?,
     val createdAt: Long?,
     @SerializedName("last_used") val lastUsed: Long?,
-    val active: Int
+    val active: Int,
+    val mode: String?
 )
 data class KeysResp(val keys: List<KeyItem>)
 data class NotificationItem(
