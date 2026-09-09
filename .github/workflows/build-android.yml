@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 允许创建/更新 GitHub Release
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,12 +32,13 @@ jobs:
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       # 项目未提交 Gradle wrapper，使用 gradle-version 直接构建（无需本地 wrapper）
+      # 版本号用 run number：App 端检测更新靠 versionCode 对比
       - name: Build debug APK
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.6
           build-root-directory: android
-          arguments: :app:assembleDebug
+          arguments: :app:assembleDebug -PappVersionCode=${{ github.run_number }} -PappVersionName=1.0.${{ github.run_number }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -43,3 +46,18 @@ jobs:
           name: app-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # 发布到 tag latest 的 Release（覆盖旧版），Web 控制台的下载链接固定指向
+      # https://github.com/waxilo/notify-hub/releases/latest/download/app-debug.apk
+      - name: Publish APK to Release (tag: latest)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest \
+            android/app/build/outputs/apk/debug/app-debug.apk \
+            --title "Android APK v1.0.${{ github.run_number }}" \
+            --notes "CI 自动构建的调试版 APK（run ${{ github.run_number }}），可直接下载安装。
+          VERSION_CODE=${{ github.run_number }}
+          VERSION_NAME=1.0.${{ github.run_number }}"
