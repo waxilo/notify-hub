@@ -66,6 +66,8 @@
             android:id="@+id/btnTest"
             android:text="测试"
             android:textSize="13sp"
+            android:textColor="@color/card"
+            android:background="@drawable/bg_btn_primary"
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content" />

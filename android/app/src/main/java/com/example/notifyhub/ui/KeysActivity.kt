@@ -49,9 +49,6 @@ class KeysActivity : AppCompatActivity() {
         rv.layoutManager = LinearLayoutManager(this)
         rv.adapter = adapter
 
-        findViewById<Button>(R.id.btnInbox).setOnClickListener {
-            startActivity(Intent(this, NotificationsActivity::class.java))
-        }
         findViewById<Button>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }

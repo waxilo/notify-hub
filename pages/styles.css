@@ -169,3 +169,42 @@ tr:last-child td { border-bottom: none; }
 @media (min-width: 640px) {
   .key-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---- 全局审查补充：顶栏 / 动效 / 空状态 / 表格 ---- */
+body {
+  background:
+    radial-gradient(1200px 400px at 50% -100px, rgba(79, 110, 247, .08), transparent 70%),
+    var(--bg);
+}
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  background: rgba(244, 246, 251, .85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 4px 12px;
+}
+.topnav button {
+  border: 1.5px solid transparent; background: transparent; color: var(--muted);
+  padding: 8px 14px; border-radius: 10px; cursor: pointer;
+  font-size: 14px; font-weight: 550; transition: all .15s;
+}
+.topnav button:hover { color: var(--text); background: #eef1f6; }
+.topnav button.active { color: var(--primary); background: var(--primary-soft); }
+.topnav button.ghost { color: var(--muted); }
+.topnav button.ghost:hover { color: var(--danger); background: #fdf1f1; }
+
+.card, .key-card, .btn, .badge, input { transition: all .18s ease; }
+.modal-mask { animation: fadeIn .18s ease; }
+.modal { animation: slideUp .22s cubic-bezier(.2, .8, .3, 1); }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
+
+.empty {
+  text-align: center; color: var(--muted); padding: 36px 0;
+  border: 1.5px dashed var(--border); border-radius: 12px; font-size: 13.5px;
+}
+tbody tr:hover td { background: #f8fafd; }
+table code { font-size: 12px; }
+
+.card-head .btn.primary { padding: 8px 18px; }

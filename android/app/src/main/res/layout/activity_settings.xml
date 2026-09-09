@@ -2,105 +2,138 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:clipToPadding="false"
     android:background="@color/bg">
 
     <LinearLayout
         android:orientation="vertical"
-        android:padding="20dp"
+        android:padding="16dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <TextView
-            android:text="发送测试通知"
-            android:textStyle="bold"
-            android:textColor="@color/text_main"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <TextView
-            android:text="选择一个 key，通过真实 webhook 发送测试消息，验证链路与 App 收件。"
-            android:textSize="13sp"
-            android:textColor="@color/text_muted"
-            android:layout_marginTop="4dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <Button
-            android:id="@+id/btnTestNotify"
-            android:text="选择 Key 并发送测试"
+        <!-- 卡片：发送测试通知 -->
+        <LinearLayout
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="18dp"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-        <TextView
-            android:id="@+id/tvTestMsg"
-            android:textColor="@color/ok_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content">
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/border"
-            android:layout_marginVertical="16dp" />
+            <TextView
+                android:text="发送测试通知"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_main"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+            <TextView
+                android:text="选择一个 key，通过真实 webhook 发送测试消息，验证链路与 App 收件。"
+                android:textSize="13sp"
+                android:textColor="@color/text_muted"
+                android:layout_marginTop="4dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+            <Button
+                android:id="@+id/btnTestNotify"
+                android:text="选择 Key 并发送测试"
+                android:layout_marginTop="12dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <TextView
+                android:id="@+id/tvTestMsg"
+                android:textSize="13sp"
+                android:textColor="@color/ok_text"
+                android:layout_marginTop="8dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
 
-        <TextView
-            android:text="版本与更新"
-            android:textStyle="bold"
-            android:textColor="@color/text_main"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <TextView
-            android:id="@+id/tvVersion"
-            android:text="当前版本：检查中…"
-            android:textSize="13sp"
-            android:textColor="@color/text_muted"
-            android:layout_marginTop="4dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <Button
-            android:id="@+id/btnCheckUpdate"
-            android:text="检测更新"
+        <!-- 卡片：版本与更新 -->
+        <LinearLayout
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="18dp"
+            android:layout_marginTop="12dp"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-        <TextView
-            android:id="@+id/tvUpdateMsg"
-            android:textColor="@color/ok_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content">
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/border"
-            android:layout_marginVertical="16dp" />
+            <TextView
+                android:text="版本与更新"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_main"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+            <TextView
+                android:id="@+id/tvVersion"
+                android:text="当前版本：检查中…"
+                android:textSize="13sp"
+                android:textColor="@color/text_muted"
+                android:layout_marginTop="4dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+            <Button
+                android:id="@+id/btnCheckUpdate"
+                android:text="检测更新"
+                android:layout_marginTop="12dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <TextView
+                android:id="@+id/tvUpdateMsg"
+                android:textSize="13sp"
+                android:textColor="@color/ok_text"
+                android:layout_marginTop="8dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
 
-        <TextView
-            android:text="修改密码"
-            android:textStyle="bold"
-            android:textColor="@color/text_main"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <EditText
-            android:id="@+id/etOld"
-            android:hint="原密码"
-            android:inputType="textPassword"
-            android:layout_marginTop="6dp"
+        <!-- 卡片：修改密码 -->
+        <LinearLayout
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="18dp"
+            android:layout_marginTop="12dp"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-        <EditText
-            android:id="@+id/etNew"
-            android:hint="新密码（至少 6 位）"
-            android:inputType="textPassword"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-        <Button
-            android:id="@+id/btnChangePw"
-            android:text="修改密码"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content">
 
-        <TextView
-            android:id="@+id/tvMsg"
-            android:textColor="@color/danger"
-            android:layout_marginTop="8dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+            <TextView
+                android:text="修改密码"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_main"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+            <EditText
+                android:id="@+id/etOld"
+                android:hint="原密码"
+                android:inputType="textPassword"
+                android:layout_marginTop="12dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <EditText
+                android:id="@+id/etNew"
+                android:hint="新密码（至少 6 位）"
+                android:inputType="textPassword"
+                android:layout_marginTop="10dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <Button
+                android:id="@+id/btnChangePw"
+                android:text="修改密码"
+                android:textColor="@color/card"
+                android:background="@drawable/bg_btn_primary"
+                android:layout_marginTop="14dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <TextView
+                android:id="@+id/tvMsg"
+                android:textSize="13sp"
+                android:textColor="@color/danger"
+                android:layout_marginTop="8dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <Space android:layout_width="match_parent" android:layout_height="16dp" />
     </LinearLayout>
 </ScrollView>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 全局主题：统一品牌色 / 按钮 / 输入框 / 对话框 -->
+    <style name="Theme.NotifyHub" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryDark">@color/primary_dark</item>
+        <item name="colorAccent">@color/primary</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="buttonStyle">@style/Widget.AppButton</item>
+        <item name="editTextStyle">@style/Widget.AppEditText</item>
+        <item name="alertDialogTheme">@style/Theme.AppDialog</item>
+    </style>
+
+    <!-- 次级按钮（默认）：白底圆角描边，品牌色文字 -->
+    <style name="Widget.AppButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/bg_btn</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/primary_dark</item>
+    </style>
+
+    <!-- 主操作按钮：实心品牌色（布局里用 android:background="@drawable/bg_btn_primary" 覆盖） -->
+    <style name="Widget.AppButton.Primary">
+        <item name="android:background">@drawable/bg_btn_primary</item>
+        <item name="android:textColor">@color/card</item>
+    </style>
+
+    <!-- 输入框：圆角填充 + 聚焦描边 -->
+    <style name="Widget.AppEditText" parent="Widget.AppCompat.EditText">
+        <item name="android:background">@drawable/bg_input</item>
+        <item name="android:minHeight">46dp</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/text_main</item>
+    </style>
+
+    <!-- 对话框：圆角白底 + 品牌色按钮文字 -->
+    <style name="Theme.AppDialog" parent="Theme.AppCompat.DayNight.Dialog.Alert">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorAccent">@color/primary</item>
+        <item name="android:windowBackground">@drawable/bg_dialog</item>
+        <item name="buttonStyle">@style/Widget.AppButton</item>
+        <item name="editTextStyle">@style/Widget.AppEditText</item>
+        <item name="buttonBarButtonStyle">@style/Widget.AppDialogButton</item>
+    </style>
+    <style name="Widget.AppDialogButton" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
+        <item name="android:textColor">@color/primary_dark</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+</resources>

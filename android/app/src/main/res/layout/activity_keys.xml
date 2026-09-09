@@ -12,33 +12,29 @@
         android:paddingStart="16dp"
         android:paddingEnd="12dp"
         android:paddingTop="14dp"
-        android:paddingBottom="10dp"
+        android:paddingBottom="4dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
+        <View
+            android:background="@drawable/bg_brand_dot"
+            android:layout_width="16dp"
+            android:layout_height="16dp" />
+
         <TextView
             android:text="Notify Hub"
-            android:textSize="20sp"
+            android:textSize="19sp"
             android:textStyle="bold"
             android:textColor="@color/text_main"
+            android:layout_marginStart="10dp"
             android:layout_weight="1"
             android:layout_width="0dp"
-            android:layout_height="wrap_content" />
-
-        <Button
-            android:id="@+id/btnInbox"
-            android:text="收件箱"
-            android:textSize="13sp"
-            android:background="@drawable/bg_chip_mode"
-            android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
         <Button
             android:id="@+id/btnRefresh"
             android:text="刷新"
             android:textSize="13sp"
-            android:layout_marginStart="8dp"
-            android:background="@drawable/bg_chip_mode"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
@@ -47,18 +43,17 @@
             android:text="设置"
             android:textSize="13sp"
             android:layout_marginStart="8dp"
-            android:background="@drawable/bg_chip_mode"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
     </LinearLayout>
 
     <TextView
-        android:text="Key 列表 · 点击卡片操作管理"
+        android:text="Key 列表 · 每个即一个消息通道"
         android:textSize="12sp"
         android:textColor="@color/text_muted"
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
-        android:paddingBottom="4dp"
+        android:paddingBottom="2dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 

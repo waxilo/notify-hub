@@ -114,42 +114,63 @@ async function renderKeys() {
   const view = $('#view-keys');
   view.innerHTML = `
     <div class="card">
-      <div class="card-head"><h2>生成 Webhook Key</h2></div>
-      <form id="key-form" class="row">
-        <input name="name" placeholder="名称（如：服务器告警）" />
-        <button class="btn primary" type="submit">生成</button>
-      </form>
-      <p class="msg" id="key-msg"></p>
-      <div id="new-key"></div>
-    </div>
-    <div class="card">
       <div class="card-head">
         <h2>我的 Key</h2>
-        <span class="hint">默认模式：title / body / message 字段；自定义模式：按 JSON 路径提取</span>
+        <button class="btn primary" id="btn-new-key">＋ 新建 Key</button>
       </div>
+      <p class="hint" style="margin-top:-6px;margin-bottom:12px;">默认模式识别 title / body / message 字段；自定义模式在 Key 编辑里按 JSON 路径配置提取。</p>
       <div id="key-list"><p class="hint">加载中…</p></div>
     </div>`;
-  $('#key-form').onsubmit = async (e) => {
+  $('#btn-new-key').onclick = () => openKeyCreate();
+  loadList();
+}
+
+// 新建 Key 弹窗：成功后直接在弹窗内展示 key 与 webhook 地址（可复制）
+function openKeyCreate() {
+  const root_ = $('#modal-root');
+  root_.innerHTML = `
+  <div class="modal-mask">
+    <div class="modal card">
+      <h2>新建 Key</h2>
+      <p class="hint">每个 key 即一个独立消息通道，可随时编辑名称、启停与推送模式。</p>
+      <div id="create-body">
+        <form id="create-form">
+          <label>名称</label>
+          <input name="name" placeholder="如：服务器告警" required />
+          <div class="modal-actions">
+            <button type="button" class="btn ghost" id="create-cancel">取消</button>
+            <button type="submit" class="btn primary">生成</button>
+          </div>
+          <p class="msg" id="create-msg"></p>
+        </form>
+      </div>
+    </div>
+  </div>`;
+  $('#create-cancel').onclick = () => { root_.innerHTML = ''; };
+  $('#create-form').onsubmit = async (e) => {
     e.preventDefault();
-    $('#key-msg').textContent = '';
+    $('#create-msg').textContent = '';
     try {
       const k = await api.createKey(e.target.name.value.trim() || 'default');
-      $('#new-key').innerHTML = `
+      $('#create-body').innerHTML = `
         <div class="alert">
-          <b>已生成（随时可在下方列表复制）</b><br/>
+          <b>✅ 已生成（随时可在下方列表复制）</b><br/>
+          <span class="hint">Key</span><br/>
           <code>${escapeHtml(k.key)}</code>
           <button class="btn mini" data-newcopy="${escapeHtml(k.key)}">复制 Key</button><br/>
-          Webhook 地址：<code>${API_BASE}/hook/${escapeHtml(k.key)}</code>
+          <span class="hint">Webhook 地址</span><br/>
+          <code>${API_BASE}/hook/${escapeHtml(k.key)}</code>
           <button class="btn mini" data-newcopy="${API_BASE}/hook/${escapeHtml(k.key)}">复制地址</button>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn primary" id="create-done">完成</button>
         </div>`;
-      $('#new-key').querySelectorAll('[data-newcopy]').forEach((b) => {
+      $('#create-body').querySelectorAll('[data-newcopy]').forEach((b) => {
         b.onclick = () => copyText(b.dataset.newcopy, b);
       });
-      e.target.reset();
-      loadList();
-    } catch (err) { $('#key-msg').textContent = err.message; }
+      $('#create-done').onclick = () => { root_.innerHTML = ''; loadList(); };
+    } catch (err) { $('#create-msg').textContent = err.message; }
   };
-  loadList();
 }
 
 async function loadList() {

@@ -11,7 +11,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import com.example.notifyhub.api.Api
-import com.example.notifyhub.ui.NotificationsActivity
+import com.example.notifyhub.ui.KeysActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -157,7 +157,9 @@ class PushService : Service() {
 
     private fun buildForegroundNotification(): Notification {
         val pi = PendingIntent.getActivity(
-            this, 0, Intent(this, NotificationsActivity::class.java),
+            this, 0,
+            Intent(this, KeysActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -178,7 +180,8 @@ class PushService : Service() {
     private fun showNotification(title: String, body: String, id: Long) {
         val nm = ensureChannel()
         val pi = PendingIntent.getActivity(
-            this, id.toInt().coerceAtLeast(1), Intent(this, NotificationsActivity::class.java),
+            this, id.toInt().coerceAtLeast(1),
+            Intent(this, KeysActivity::class.java)
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)

@@ -47,7 +47,7 @@ class LoginActivity : AppCompatActivity() {
                 val api = Api.instance(this@LoginActivity)
                 val resp = api.login(CredReq(username, password))
                 TokenStore(this@LoginActivity).token = resp.token
-                startActivity(Intent(this@LoginActivity, NotificationsActivity::class.java))
+                startActivity(Intent(this@LoginActivity, KeysActivity::class.java))
                 finish()
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) { msg.text = e.message ?: "请求失败" }
