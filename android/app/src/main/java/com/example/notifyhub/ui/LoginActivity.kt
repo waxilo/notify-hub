@@ -18,6 +18,14 @@ import kotlinx.coroutines.withContext
 class LoginActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 已有登录态（JWT 无过期时间，服务端不吊销即长期有效）：直接进入主界面
+        if (!TokenStore(this).token.isNullOrBlank()) {
+            startActivity(Intent(this, NotificationsActivity::class.java))
+            finish()
+            return
+        }
+
         setContentView(R.layout.activity_login)
 
         val user = findViewById<EditText>(R.id.etUser)

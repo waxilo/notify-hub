@@ -28,16 +28,25 @@ class PushService : Service() {
         .build()
     private var ws: WebSocket? = null
     private var retry = 0
+    private var authFailed = false          // token 无效（401）时停止重试，等重新登录后再启动
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
+        ensureChannel()
         startForeground(FOREGROUND_ID, buildForegroundNotification())
         connect()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // token 更新（重新登录）后重启服务会再次触发 connect 前 close
+        // 重新登录后再次 startService：重置鉴权失败标记并在未连接时重新 connect
+        if (authFailed) {
+            authFailed = false
+            retry = 0
+            connect()
+        } else if (ws == null) {
+            connect()
+        }
         return START_STICKY
     }
 
@@ -64,6 +73,7 @@ class PushService : Service() {
 
     private fun connect() {
         val url = wsUrl() ?: return  // 未登录或地址无效：不连
+        ws?.cancel()
         val req = Request.Builder().url(url).build()
         ws = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -86,11 +96,19 @@ class PushService : Service() {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                ws = null
+                if (response?.code == 401) {
+                    // token 已失效：停止重试，等待用户重新登录后由 onStartCommand 触发重连
+                    authFailed = true
+                    TokenStore(this@PushService).clear()
+                    return
+                }
                 scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                scheduleReconnect()
+                ws = null
+                if (!authFailed) scheduleReconnect()
             }
         })
     }
@@ -106,20 +124,24 @@ class PushService : Service() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "通知推送", NotificationManager.IMPORTANCE_HIGH)
+                NotificationChannel(PUSH_CHANNEL_ID, "通知推送", NotificationManager.IMPORTANCE_HIGH)
+            )
+            // 前台服务必须展示一条通知（系统限制），降为最低优先级：
+            // 无声音、无状态栏图标，折叠在通知栏最底部"后台运行"分组里
+            nm.createNotificationChannel(
+                NotificationChannel(FG_CHANNEL_ID, "后台连接", NotificationManager.IMPORTANCE_MIN)
             )
         }
         return nm
     }
 
     private fun buildForegroundNotification(): Notification {
-        ensureChannel()
         val pi = PendingIntent.getActivity(
             this, 0, Intent(this, NotificationsActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            Notification.Builder(this, CHANNEL_ID)
+            Notification.Builder(this, FG_CHANNEL_ID)
         else
             @Suppress("DEPRECATION") Notification.Builder(this)
         return b
@@ -127,6 +149,8 @@ class PushService : Service() {
             .setContentText("实时接收推送通知")
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentIntent(pi)
+            .setPriority(Notification.PRIORITY_MIN)
+            .setShowWhen(false)
             .setOngoing(true)
             .build()
     }
@@ -138,7 +162,7 @@ class PushService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            Notification.Builder(this, CHANNEL_ID)
+            Notification.Builder(this, PUSH_CHANNEL_ID)
         else
             @Suppress("DEPRECATION") Notification.Builder(this)
         val n = b
@@ -153,7 +177,8 @@ class PushService : Service() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "notify_hub_push"
+        private const val PUSH_CHANNEL_ID = "notify_hub_push"
+        private const val FG_CHANNEL_ID = "notify_hub_foreground"
         private const val FOREGROUND_ID = 1001
     }
 }

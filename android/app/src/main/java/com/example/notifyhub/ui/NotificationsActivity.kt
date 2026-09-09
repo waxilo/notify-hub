@@ -15,8 +15,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.NotificationItem
-import com.example.notifyhub.data.ConfigStore
 import com.example.notifyhub.data.PushService
+import com.example.notifyhub.data.TokenStore
 import com.example.notifyhub.data.UpdateChecker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -91,7 +91,7 @@ class NotificationsActivity : AppCompatActivity() {
         lifecycleScope.launch {
             while (polling && isActive) {
                 loadOnceSuspend()
-                delay(ConfigStore(this@NotificationsActivity).pollIntervalMs)
+                delay(REFRESH_INTERVAL_MS)
             }
         }
     }
@@ -104,9 +104,17 @@ class NotificationsActivity : AppCompatActivity() {
         try {
             val resp = Api.safe { Api.instance(this@NotificationsActivity).listNotifications(50) }
             withContext(Dispatchers.Main) { adapter.submit(resp.notifications) }
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 401) backToLogin()  // token 失效：清登录态并踢回登录页
         } catch (_: Exception) {
             // 轮询时静默失败，避免刷屏
         }
+    }
+
+    private fun backToLogin() {
+        TokenStore(this).clear()
+        startActivity(Intent(this, LoginActivity::class.java))
+        finish()
     }
 
     private fun markRead(item: NotificationItem) {
@@ -117,5 +125,10 @@ class NotificationsActivity : AppCompatActivity() {
             } catch (_: Exception) {
             }
         }
+    }
+
+    companion object {
+        // 页面内列表自动刷新间隔（仅刷新界面，与实时推送无关）
+        private const val REFRESH_INTERVAL_MS = 10_000L
     }
 }

@@ -21,19 +21,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
-        <TextView
-            android:text="轮询间隔（秒）"
-            android:textStyle="bold"
-            android:layout_marginTop="12dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <EditText
-            android:id="@+id/etPoll"
-            android:hint="10"
-            android:inputType="number"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
         <Button
             android:id="@+id/btnSaveCfg"
             android:text="保存配置"
