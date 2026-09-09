@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.example.notifyhub.LogHelper
 import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.CredReq
@@ -26,9 +27,12 @@ class LoginActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
 
+        LogHelper.append(this, "LoginActivity onCreate")
+
         // 上次有崩溃日志：跳过自动登录跳转，先展示崩溃详情（无 adb 环境定位闪退）
         val crashFile = File(getExternalFilesDir(null) ?: filesDir, "crash/last.txt")
         if (crashFile.exists()) {
+            LogHelper.append(this, "crash log exists -> show dialog")
             setContentView(R.layout.activity_login)
             showLastCrash(crashFile)
             return
@@ -36,6 +40,7 @@ class LoginActivity : AppCompatActivity() {
 
         // 已有登录态（JWT 无过期时间，服务端不吊销即长期有效）：直接进入主界面
         if (!TokenStore(this).token.isNullOrBlank()) {
+            LogHelper.append(this, "token present -> KeysActivity")
             startActivity(Intent(this, KeysActivity::class.java))
             finish()
             return
@@ -72,12 +77,14 @@ class LoginActivity : AppCompatActivity() {
                 val api = Api.instance(this@LoginActivity)
                 val resp = api.login(CredReq(username, password))
                 TokenStore(this@LoginActivity).token = resp.token
+                LogHelper.append(this@LoginActivity, "login ok")
                 // 记住账号密码：登录成功才写入；未勾选则清除旧记录
                 val cred = CredStore(this@LoginActivity)
                 if (remember) cred.save(username, password) else cred.clear()
                 startActivity(Intent(this@LoginActivity, KeysActivity::class.java))
                 finish()
             } catch (e: Exception) {
+                LogHelper.append(this@LoginActivity, "login failed: ${e.message}")
                 withContext(Dispatchers.Main) { msg.text = e.message ?: "请求失败" }
             } finally {
                 loading.hide()

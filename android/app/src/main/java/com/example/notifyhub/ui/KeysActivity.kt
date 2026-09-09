@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.notifyhub.LogHelper
 import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.KeyItem
@@ -45,11 +46,15 @@ class KeysActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_keys)
 
+        LogHelper.append(this, "KeysActivity onCreate")
+
         // 收件箱移除后由首页负责拉起前台推送服务，保证 WS 实时推送在线
         val svc = Intent(this, com.example.notifyhub.data.PushService::class.java)
         try {
             if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(svc) else startService(svc)
-        } catch (_: Exception) {
+            LogHelper.append(this, "startForegroundService ok")
+        } catch (e: Exception) {
+            LogHelper.append(this, "startForegroundService failed: ${e.javaClass.simpleName}: ${e.message}")
         }
         // Android 13+ 动态请求通知权限
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
@@ -80,10 +85,12 @@ class KeysActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val list = Api.safe { Api.instance(this@KeysActivity).listKeys() }.keys
+                LogHelper.append(this@KeysActivity, "listKeys ok size=${list.size}")
                 keys.clear()
                 keys.addAll(list)
                 withContext(Dispatchers.Main) { adapter.notifyDataSetChanged() }
             } catch (e: retrofit2.HttpException) {
+                LogHelper.append(this@KeysActivity, "listKeys http ${e.code()}")
                 if (e.code() == 401) backToLogin()
             } catch (_: Exception) {
             } finally {

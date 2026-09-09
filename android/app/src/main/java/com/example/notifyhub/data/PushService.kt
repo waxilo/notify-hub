@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import com.example.notifyhub.LogHelper
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.ui.KeysActivity
 import kotlinx.coroutines.CoroutineScope
@@ -44,7 +45,10 @@ class PushService : Service() {
         // 表现为 App 闪退且连登录页都进不去
         try {
             startForeground(FOREGROUND_ID, buildForegroundNotification())
+            LogHelper.append(this, "PushService startForeground ok")
         } catch (e: Exception) {
+            // 后台重启被系统拒绝：静默停掉自己并留痕，避免崩溃循环导致 App 无法进入
+            LogHelper.append(this, "startForeground rejected: ${e.javaClass.simpleName}: ${e.message}")
             stopSelf()
             return
         }
@@ -52,6 +56,7 @@ class PushService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        LogHelper.append(this, "PushService onStartCommand")
         // 重新登录后再次 startService：重置鉴权失败标记并在未连接时重新 connect
         if (authFailed) {
             authFailed = false
