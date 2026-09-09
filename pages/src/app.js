@@ -11,6 +11,11 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// 尝试把 JSON 字符串格式化为缩进形式，失败则原样返回
+function prettyJson(s) {
+  try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return String(s ?? ''); }
+}
+
 function copyText(text, btn) {
   navigator.clipboard.writeText(text).then(() => {
     if (!btn) return;
@@ -405,7 +410,7 @@ async function openKeyHistory(k) {
         <h2>「${escapeHtml(k.name)}」发送历史</h2>
         <button class="btn mini" id="hist-close">关闭</button>
       </div>
-      <p class="hint">状态说明：<b class="ok">已触达</b> = App 已弹出系统通知；<b class="warn">未触达</b> = App 离线尚未接收</p>
+      <p class="hint">状态说明：<b class="ok">已触达</b> = App 已弹出系统通知；<b class="warn">未触达</b> = App 离线尚未接收。点击「原文」可查看调用方发送的完整未解析参数。</p>
       <div id="hist-body"><p class="hint">加载中…</p></div>
       <div class="modal-actions" id="hist-pager" style="justify-content:space-between;align-items:center;">
         <span class="hint" id="hist-total"></span>
@@ -431,8 +436,8 @@ async function openKeyHistory(k) {
       }
       body.innerHTML = `
         <table>
-          <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th></tr></thead>
-          <tbody>${notifications.map((n) => `
+          <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th><th>原文</th></tr></thead>
+          <tbody>${notifications.map((n, i) => `
             <tr>
               <td>${escapeHtml(n.title)}</td>
               <td>${escapeHtml((n.body || '').slice(0, 80))}</td>
@@ -440,11 +445,33 @@ async function openKeyHistory(k) {
               <td>${n.delivered_at
                 ? `<b class="ok">已触达</b><br/><span class="hint xs">${new Date(n.delivered_at).toLocaleString()}</span>`
                 : '<b class="warn">未触达</b>'}</td>
+              <td>${n.payload ? `<button class="btn mini" data-raw="${i}">查看</button>` : '<span class="hint xs">无</span>'}</td>
             </tr>`).join('')}</tbody>
-        </table>`;
+        </table>
+        <div id="hist-raw"></div>`;
       $('#hist-total').textContent = `共 ${total} 条 · 第 ${page + 1} / ${pages} 页`;
       $('#hist-prev').disabled = page <= 0;
       $('#hist-next').disabled = page >= pages - 1;
+      // 「原文」按钮：展示调用方发送的完整未解析 payload
+      const rawBox = $('#hist-raw');
+      const showRaw = (n, btn) => {
+        const pretty = prettyJson(n.payload);
+        rawBox.hidden = false;
+        rawBox.innerHTML = `
+          <div class="doc-code" style="max-height:260px;overflow:auto;"><code>${escapeHtml(pretty)}</code><button class="btn mini doc-copy">复制</button></div>
+          <p class="hint xs">↑ 通知 #${n.id} 的原始请求参数</p>`;
+        rawBox.querySelector('.doc-copy').onclick = (e) => copyText(pretty, e.target);
+        btn.textContent = '收起';
+      };
+      body.querySelectorAll('[data-raw]').forEach((btn) => {
+        btn.onclick = () => {
+          const n = notifications[Number(btn.dataset.raw)];
+          if (!n) return;
+          if (btn.textContent === '收起') { rawBox.hidden = true; rawBox.innerHTML = ''; btn.textContent = '查看'; return; }
+          body.querySelectorAll('[data-raw]').forEach((b) => { if (b !== btn) { b.textContent = '查看'; } });
+          showRaw(n, btn);
+        };
+      });
     } catch (err) {
       body.innerHTML = `<p class="msg">加载失败：${err.message}</p>`;
     }

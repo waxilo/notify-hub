@@ -118,9 +118,44 @@ class KeyHistoryActivity : AppCompatActivity() {
             h.tvStatus.text = row.status
             h.tvStatus.setTextColor(row.statusColor)
             h.tvStatus.setBackgroundResource(row.chipBg)
+            // 点击条目查看原始请求参数（完整、未解析的 payload）
+            h.itemView.setOnClickListener { showRawPayload(n) }
         }
 
         override fun getItemCount() = data.size
+    }
+
+    // 弹窗展示调用方发送的原始参数：JSON 尽量格式化，纯文本原样展示，可复制
+    private fun showRawPayload(n: NotificationItem) {
+        val raw = n.payload
+        if (raw.isNullOrBlank()) {
+            toast("该记录没有原文（可能是纯文本或早期消息）")
+            return
+        }
+        val pretty = try {
+            val el = com.google.gson.JsonParser.parseString(raw)
+            com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(el)
+        } catch (_: Exception) {
+            raw
+        }
+        val tv = TextView(this).apply {
+            text = pretty
+            setTextIsSelectable(true)
+            typeface = android.graphics.Typeface.MONOSPACE
+            textSize = 13f
+            setPadding(48, 32, 48, 32)
+        }
+        val scroll = android.widget.ScrollView(this).apply { addView(tv) }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("原始请求参数（#${n.id}）")
+            .setView(scroll)
+            .setPositiveButton("复制") { _, _ ->
+                val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("payload", pretty))
+                toast("已复制原文")
+            }
+            .setNegativeButton("关闭", null)
+            .show()
     }
 
     companion object {
