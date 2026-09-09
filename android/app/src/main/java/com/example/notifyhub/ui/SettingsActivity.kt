@@ -74,6 +74,12 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // "安装未知应用"授权后返回：自动继续安装
+        com.example.notifyhub.data.UpdateChecker.resumePendingInstall(this)
+    }
+
     private suspend fun checkUpdate(tvUpdate: TextView) {
         val latest = UpdateChecker.latest(this)
         withContext(Dispatchers.Main) {
@@ -83,13 +89,30 @@ class SettingsActivity : AppCompatActivity() {
                     tvUpdate.text = "发现新版本 v${latest.versionName ?: latest.versionCode}"
                     AlertDialog.Builder(this@SettingsActivity)
                         .setTitle("发现新版本")
-                        .setMessage("最新版本：v${latest.versionName ?: "?"}（code ${latest.versionCode}）\n是否下载安装？")
-                        .setPositiveButton("下载") { _, _ -> UpdateChecker.openDownload(this@SettingsActivity, latest) }
+                        .setMessage("最新版本：v${latest.versionName ?: "?"}（code ${latest.versionCode}）\n下载完成后将自动打开安装程序。")
+                        .setPositiveButton("下载") { _, _ ->
+                            lifecycleScope.launch { downloadAndInstall(latest, tvUpdate) }
+                        }
                         .setNegativeButton("以后再说", null)
                         .show()
                 }
                 else -> tvUpdate.text = "已是最新版本"
             }
+        }
+    }
+
+    private suspend fun downloadAndInstall(latest: com.example.notifyhub.data.UpdateInfo, tvUpdate: TextView) {
+        withContext(Dispatchers.Main) { tvUpdate.text = "静默下载中…" }
+        try {
+            val result = UpdateChecker.downloadAndInstall(this@SettingsActivity, latest) { p ->
+                withContext(Dispatchers.Main) { tvUpdate.text = "下载中 $p%" }
+            }
+            withContext(Dispatchers.Main) {
+                tvUpdate.text = if (result == "installing") "已打开安装程序，确认安装即可"
+                else "请在授权页允许安装未知应用，返回后自动继续安装"
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) { tvUpdate.text = "下载失败：${e.message}" }
         }
     }
 

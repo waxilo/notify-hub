@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -61,7 +62,23 @@ class NotificationsActivity : AppCompatActivity() {
                         .setTitle("发现新版本")
                         .setMessage("最新版本：v${latest.versionName ?: "?"}（code ${latest.versionCode}），是否下载？")
                         .setPositiveButton("下载") { _, _ ->
-                            UpdateChecker.openDownload(this@NotificationsActivity, latest)
+                            lifecycleScope.launch {
+                                val result = try {
+                                    UpdateChecker.downloadAndInstall(this@NotificationsActivity, latest)
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(this@NotificationsActivity, "下载失败：${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                    return@launch
+                                }
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(
+                                        this@NotificationsActivity,
+                                        if (result == "installing") "已打开安装程序，确认安装即可" else "请在授权页允许安装未知应用，返回后自动继续",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
                         }
                         .setNegativeButton("忽略", null)
                         .show()
@@ -83,6 +100,8 @@ class NotificationsActivity : AppCompatActivity() {
         super.onResume()
         polling = true
         startPolling()
+        // "安装未知应用"授权后返回：自动继续安装
+        UpdateChecker.resumePendingInstall(this)
     }
 
     override fun onPause() {
