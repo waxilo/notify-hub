@@ -28,7 +28,12 @@ import java.util.Locale
 // 按 key 查看发送历史，含每条消息的触发与触达状态
 class KeyHistoryActivity : AppCompatActivity() {
 
-    private data class Row(val item: NotificationItem, val status: String, val statusColor: Int)
+    private data class Row(
+        val item: NotificationItem,
+        val status: String,
+        val statusColor: Int,
+        val chipBg: Int
+    )
 
     private val rows = mutableListOf<Row>()
     private lateinit var adapter: HistoryAdapter
@@ -92,10 +97,10 @@ class KeyHistoryActivity : AppCompatActivity() {
                 val resp = Api.safe { Api.instance(this@KeyHistoryActivity).listNotifications(100, keyId) }
                 rows.clear()
                 resp.notifications.forEach { n ->
-                rows.add(
-                    if (n.deliveredAt != null) Row(n, "已触达", 0xFF17994F.toInt(), R.drawable.bg_chip_on)
-                    else Row(n, "未触达", 0xFFC07F00.toInt(), R.drawable.bg_chip_off)
-                )
+                    rows.add(
+                        if (n.deliveredAt != null) Row(n, "已触达", 0xFF17994F.toInt(), R.drawable.bg_chip_on)
+                        else Row(n, "未触达", 0xFFC07F00.toInt(), R.drawable.bg_chip_off)
+                    )
                 }
                 withContext(Dispatchers.Main) {
                     tvMsg.text = "共 ${resp.total} 条（显示最近 ${rows.size} 条）"
@@ -131,6 +136,7 @@ class KeyHistoryActivity : AppCompatActivity() {
             h.tvMeta.text = "「${n.keyName ?: "未知 Key"}」 · ${fmt.format(Date(n.createdAt))}"
             h.tvStatus.text = row.status
             h.tvStatus.setTextColor(row.statusColor)
+            h.tvStatus.setBackgroundResource(row.chipBg)
         }
 
         override fun getItemCount() = data.size

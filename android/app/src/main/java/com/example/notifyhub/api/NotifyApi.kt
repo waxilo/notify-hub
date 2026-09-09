@@ -59,6 +59,7 @@ interface NotifyApi {
     @POST("/api/password") suspend fun changePassword(@Body req: ChangePwReq): Response<Unit>
     @POST("/api/keys") suspend fun createKey(@Body req: CreateKeyReq): KeyResp
     @GET("/api/keys") suspend fun listKeys(): KeysResp
+    @PUT("/api/keys/{id}") suspend fun updateKey(@Path("id") id: Long, @Body req: UpdateKeyReq): Response<Unit>
     @DELETE("/api/keys/{id}") suspend fun revokeKey(@Path("id") id: Long): Response<Unit>
     @GET("/api/notifications") suspend fun listNotifications(
         @Query("limit") limit: Int = 50,
