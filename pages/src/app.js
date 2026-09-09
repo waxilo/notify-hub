@@ -72,6 +72,7 @@ async function mainView() {
     <div class="brand"><span class="brand-dot"></span>Notify Hub</div>
     <nav class="topnav">
       <button id="tab-keys" class="active">Key 管理</button>
+      <button id="tab-docs">接入文档</button>
       <button id="tab-app">App 下载</button>
       <button id="tab-acct">账号</button>
       <button id="logout" class="ghost">退出</button>
@@ -79,11 +80,13 @@ async function mainView() {
   </header>
   <main>
     <section id="view-keys"></section>
+    <section id="view-docs" hidden></section>
     <section id="view-app" hidden></section>
     <section id="view-acct" hidden></section>
   </main>
   <div id="modal-root"></div>`;
   $('#tab-keys').onclick = () => switchTab('tab-keys', 'view-keys');
+  $('#tab-docs').onclick = () => { switchTab('tab-docs', 'view-docs'); renderDocs(); };
   $('#tab-app').onclick = () => { switchTab('tab-app', 'view-app'); renderAppDownload(); };
   $('#tab-acct').onclick = () => { switchTab('tab-acct', 'view-acct'); renderAccount(); };
   $('#logout').onclick = () => { setToken(null); authView(); };
@@ -91,9 +94,9 @@ async function mainView() {
 }
 
 function switchTab(tabId, viewId) {
-  ['tab-keys', 'tab-app', 'tab-acct'].forEach((t) => $('#' + t).classList.remove('active'));
+  ['tab-keys', 'tab-docs', 'tab-app', 'tab-acct'].forEach((t) => $('#' + t).classList.remove('active'));
   $('#' + tabId).classList.add('active');
-  ['view-keys', 'view-app', 'view-acct'].forEach((v) => { $('#' + v).hidden = v !== viewId; });
+  ['view-keys', 'view-docs', 'view-app', 'view-acct'].forEach((v) => { $('#' + v).hidden = v !== viewId; });
 }
 
 function renderAppDownload() {
@@ -106,6 +109,98 @@ function renderAppDownload() {
       <p class="hint">手机浏览器打开本页点击下载；安装时如提示"未知来源"，允许即可。</p>
       <p class="hint">历史版本见 <a href="https://github.com/waxilo/notify-hub/releases" target="_blank" rel="noopener">GitHub Releases</a>。</p>
     </div>`;
+}
+
+/* ---------- 接入文档 ---------- */
+
+function renderDocs() {
+  const view = $('#view-docs');
+  // 代码样例（raw 文本单独保存，供复制按钮使用）
+  const samples = [
+    // 0: GET 一键通知
+    `${API_BASE}/hook/<KEY>?title=服务器告警&body=CPU 使用率超过 90%`,
+    // 1: curl GET
+    `curl "${API_BASE}/hook/<KEY>?title=${encodeURIComponent('服务器告警')}&body=${encodeURIComponent('CPU 使用率超过 90%')}"`,
+    // 2: curl POST JSON
+    `curl -X POST "${API_BASE}/hook/<KEY>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"title":"服务器告警","body":"CPU 使用率超过 90%"}'`,
+    // 3: JS fetch
+    `fetch('${API_BASE}/hook/<KEY>', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ title: '服务器告警', body: 'CPU 使用率超过 90%' })
+});`,
+    // 4: Python requests
+    `import requests
+
+requests.post('${API_BASE}/hook/<KEY>', json={
+    'title': '服务器告警',
+    'body': 'CPU 使用率超过 90%',
+})`,
+    // 5: 自定义模式 payload
+    `// 第三方系统原样 POST 的 payload（不需要改造它）：
+{
+  "event": {
+    "name": "CPU 告警",
+    "alerts": [{ "title": "node-1 高负载", "message": "CPU 92%" }]
+  }
+}
+// key 配置：title_path = $.event.alerts.0.title，body_path = $.event.alerts.0.message
+// 手机收到的通知：标题「node-1 高负载」，内容「CPU 92%」`,
+    // 6: 响应
+    `{ "ok": true, "id": 71 }                      // 正常入库并推送
+{ "ok": true, "deduplicated": true, "id": 70 } // 显式 dedup_key 重复，未重复推送
+{ "error": "invalid key" }                     // key 不存在（404）
+{ "error": "key is disabled" }                 // key 已停用（403）`,
+  ];
+
+  view.innerHTML = `
+    <div class="card doc-card">
+      <h2><span class="doc-num">1</span>一键通知 · 30 秒接入</h2>
+      <p class="hint">在「Key 管理」创建一个 key，把它拼进下面的地址即可。浏览器地址栏直接回车、img 标签、脚本请求都行——最简单的推送不需要写任何代码。</p>
+      <div class="doc-code"><code>${escapeHtml(samples[0])}</code><button class="btn mini doc-copy">复制</button></div>
+      <p class="hint">或用 curl：</p>
+      <div class="doc-code"><code>${escapeHtml(samples[1])}</code><button class="btn mini doc-copy">复制</button></div>
+      <p class="hint">App 在线时通知毫秒级弹出；离线时消息会入库，App 上线后由服务端自动重推（0.3 秒间隔，最多 5 次）。</p>
+    </div>
+
+    <div class="card doc-card">
+      <h2><span class="doc-num">2</span>POST 推送（推荐）</h2>
+      <p class="hint">POST <code>${API_BASE}/hook/&lt;KEY&gt;</code>，支持三种请求体：<b>JSON</b>、<b>表单</b>（application/x-www-form-urlencoded）、<b>纯文本</b>（直接作为通知内容）。JSON 最常用：</p>
+      <div class="doc-code"><code>${escapeHtml(samples[2])}</code><button class="btn mini doc-copy">复制</button></div>
+      <p class="hint">浏览器 / Node：</p>
+      <div class="doc-code"><code>${escapeHtml(samples[3])}</code><button class="btn mini doc-copy">复制</button></div>
+      <p class="hint">Python：</p>
+      <div class="doc-code"><code>${escapeHtml(samples[4])}</code><button class="btn mini doc-copy">复制</button></div>
+      <table class="doc-params">
+        <thead><tr><th>参数</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>title</code></td><td>通知标题（最长 500 字符）</td></tr>
+          <tr><td><code>body</code> / <code>message</code> / <code>text</code></td><td>通知内容，按此顺序取第一个非空值（最长 8000 字符）</td></tr>
+          <tr><td><code>dedup_key</code></td><td>可选。显式防重 key：5 分钟窗口内相同 key 只推送一次（用于调用方超时重试场景）。不传则服务端自动生成唯一 key，消息不做内容去重</td></tr>
+        </tbody>
+      </table>
+      <p class="hint">表单模式下参数相同；防重 key 也可放在请求头 <code>X-Dedup-Key</code> 中。GET 与 POST 语义一致，仅 GET 用查询串传参。</p>
+    </div>
+
+    <div class="card doc-card">
+      <h2><span class="doc-num">3</span>自定义模式 · 接入第三方系统</h2>
+      <p class="hint">监控、CI 等第三方系统推送的 JSON 往往字段固定且不是 title / body。给 key 开启「自定义模式」并配置提取路径后，可以把这类 payload <b>原样转发</b>，由服务端提取标题和内容——无需改造调用方。</p>
+      <p class="hint">路径语法：点分路径，数组用下标；<code>$</code> 表示 JSON 本身（可省略前缀），<code>$</code> 单独使用时表示整个 JSON 字符串。示例：</p>
+      <div class="doc-code"><code>${escapeHtml(samples[5])}</code><button class="btn mini doc-copy">复制</button></div>
+      <p class="hint">提取结果为空时自动回退默认字段（title / body / message），所以两种 payload 可以混用同一个 key。在「Key 管理 → 编辑」中切换模式并填写 title_path / body_path。</p>
+    </div>
+
+    <div class="card doc-card">
+      <h2><span class="doc-num">4</span>响应与防重</h2>
+      <div class="doc-code"><code>${escapeHtml(samples[6])}</code><button class="btn mini doc-copy">复制</button></div>
+      <p class="hint"><b>防重语义</b>：服务端默认每条消息互不重复（不做内容去重）。只有当调用方显式传了 <code>dedup_key</code> 时才做去重——适合「发送超时后重试」的场景，避免重试导致重复弹通知。每条消息都会携带唯一防重 key 下发给 App，用于识别服务端重推。</p>
+    </div>`;
+
+  view.querySelectorAll('.doc-copy').forEach((btn, i) => {
+    btn.onclick = () => copyText(samples[i], btn);
+  });
 }
 
 /* ---------- Key 管理 ---------- */

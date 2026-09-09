@@ -214,6 +214,32 @@ th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--bor
 th { color: var(--muted); font-weight: 600; font-size: 12.5px; }
 tr:last-child td { border-bottom: none; }
 
+/* ---- 接入文档 ---- */
+.doc-card { margin-bottom: 16px; }
+.doc-card h2 { display: flex; align-items: center; gap: 8px; }
+.doc-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 8px; flex: none;
+  background: var(--primary); color: #fff; font-size: 13px; font-weight: 700;
+}
+.doc-code {
+  position: relative; margin: 10px 0 4px; padding: 12px 96px 12px 14px;
+  background: #1d2433; color: #dbe4f5; border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; line-height: 1.65; overflow-x: auto; white-space: pre;
+}
+.doc-code code { background: none; padding: 0; color: inherit; font-size: inherit; }
+.doc-code .doc-copy {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(255,255,255,.12); color: #dbe4f5; border: none;
+}
+.doc-code .doc-copy:hover { background: rgba(255,255,255,.22); }
+.doc-params td:first-child { white-space: nowrap; }
+@media (max-width: 640px) {
+  .doc-code { padding-right: 14px; padding-top: 40px; }
+  .doc-code .doc-copy { top: 6px; right: 6px; }
+}
+
 @media (min-width: 640px) {
   .key-url { max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
