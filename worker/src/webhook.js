@@ -16,11 +16,16 @@ async function autoDedupKey(userId, keyId, title, body) {
     .map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// 按点分路径从 JSON 提取值，支持数组下标：event.alerts.0.title
+// 按点分路径从 JSON 提取值，支持数组下标与 $ 前缀：$.event.alerts.0.title（$ 表示 JSON 本身，可省略）
 function extractByPath(obj, path) {
   if (!path) return '';
+  let p = String(path).trim();
+  if (p === '$') return obj == null ? '' : JSON.stringify(obj);
+  if (p.startsWith('$')) p = p.slice(1);
+  if (p.startsWith('.')) p = p.slice(1);
+  if (!p) return obj == null ? '' : JSON.stringify(obj);
   let cur = obj;
-  for (const seg of String(path).split('.')) {
+  for (const seg of p.split('.')) {
     if (cur == null) return '';
     if (Array.isArray(cur)) {
       const i = parseInt(seg, 10);

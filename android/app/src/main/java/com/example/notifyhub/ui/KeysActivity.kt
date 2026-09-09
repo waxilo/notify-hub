@@ -44,6 +44,15 @@ class KeysActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_keys)
 
+        // 收件箱移除后由首页负责拉起前台推送服务，保证 WS 实时推送在线
+        val svc = Intent(this, com.example.notifyhub.data.PushService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(svc) else startService(svc)
+        // Android 13+ 动态请求通知权限
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+
         adapter = KeyAdapter()
         val rv = findViewById<RecyclerView>(R.id.rv)
         rv.layoutManager = LinearLayoutManager(this)

@@ -55,7 +55,7 @@
 
         <TextView
             android:id="@+id/lblTitlePath"
-            android:text="标题提取路径 title_path（如 event.alerts.0.title）"
+            android:text="标题提取路径 title_path（如 $.event.alerts.0.title）"
             android:textSize="12sp"
             android:textStyle="bold"
             android:textColor="@color/text_secondary"
@@ -69,7 +69,7 @@
             android:layout_height="wrap_content" />
 
         <TextView
-            android:text="内容提取路径 body_path（如 event.message）"
+            android:text="内容提取路径 body_path（如 $.event.message）"
             android:textSize="12sp"
             android:textStyle="bold"
             android:textColor="@color/text_secondary"

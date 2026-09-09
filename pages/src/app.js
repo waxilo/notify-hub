@@ -118,7 +118,7 @@ async function renderKeys() {
         <h2>我的 Key</h2>
         <button class="btn primary" id="btn-new-key">＋ 新建 Key</button>
       </div>
-      <p class="hint" style="margin-top:-6px;margin-bottom:12px;">默认模式识别 title / body / message 字段；自定义模式在 Key 编辑里按 JSON 路径配置提取。</p>
+      <p class="hint" style="margin-top:-6px;margin-bottom:12px;">默认模式识别 title / body / message 字段；自定义模式按 JSON 路径提取，$ 表示 JSON 本身（如 $.msg）。</p>
       <div id="key-list"><p class="hint">加载中…</p></div>
     </div>`;
   $('#btn-new-key').onclick = () => openKeyCreate();
@@ -177,20 +177,20 @@ async function loadList() {
   const box = $('#key-list');
   try {
     const { keys } = await api.listKeys();
-    if (!keys.length) { box.innerHTML = '<p class="hint">还没有 key，先生成一个。</p>'; return; }
-    box.innerHTML = `<div class="key-grid">${keys.map((k) => `
-      <div class="key-card ${k.active ? '' : 'off'}">
-        <div class="key-head">
+    if (!keys.length) { box.innerHTML = '<div class="empty">还没有 key，点击右上角「＋ 新建 Key」创建第一个</div>'; return; }
+    box.innerHTML = `<div class="key-list">${keys.map((k) => `
+      <div class="key-row ${k.active ? '' : 'off'}" tabindex="0">
+        <div class="key-main">
           <span class="key-name">${escapeHtml(k.name)}</span>
           <span class="badge ${k.active ? 'on' : 'off'}">${k.active ? '启用中' : '已停用'}</span>
           <span class="badge mode">${k.mode === 'custom' ? '自定义' : '默认'}</span>
+          <code class="key-url">${API_BASE}/hook/${escapeHtml(k.key)}</code>
         </div>
-        <div class="key-url"><code>${API_BASE}/hook/${escapeHtml(k.key)}</code></div>
-        <div class="key-meta">
+        <div class="key-sub">
           <span class="hint">最近使用：${k.last_used ? new Date(k.last_used).toLocaleString() : '从未使用'}</span>
           ${k.mode === 'custom' ? `<span class="hint">title← ${escapeHtml(k.title_path || '(未配置)')}　body← ${escapeHtml(k.body_path || '(未配置)')}</span>` : ''}
         </div>
-        <div class="key-actions">
+        <div class="key-actions" aria-label="操作">
           <button class="btn mini" data-copykey="${k.id}">复制 Key</button>
           <button class="btn mini" data-copyurl="${k.id}">复制地址</button>
           <button class="btn mini" data-test="${k.id}" ${k.active ? '' : 'disabled'}>测试</button>
@@ -235,7 +235,7 @@ async function loadList() {
           });
           const data = await res.json().catch(() => ({}));
           msg.textContent = res.ok
-            ? `✅ 测试已送达「${k.name}」（通知 id: ${data.id}），App 收件箱稍后可见`
+            ? `✅ 测试已送达「${k.name}」（通知 id: ${data.id}），App 在线将实时弹出通知`
             : `❌ 发送失败（HTTP ${res.status}）：${data.error || '未知错误'}`;
         } catch (err) {
           msg.textContent = `❌ 网络错误：${err.message}`;
@@ -264,10 +264,10 @@ function openKeyEdit(k) {
         </div>
         <div id="custom-fields" ${k.mode === 'custom' ? '' : 'hidden'}>
           <label>标题提取路径（title_path）</label>
-          <input name="title_path" value="${escapeHtml(k.title_path || '')}" placeholder="如：event.alerts.0.title" />
+          <input name="title_path" value="${escapeHtml(k.title_path || '')}" placeholder="如：$.event.alerts.0.title" />
           <label>内容提取路径（body_path）</label>
-          <input name="body_path" value="${escapeHtml(k.body_path || '')}" placeholder="如：event.message" />
-          <p class="hint">点分路径，数组用下标（a.b.0.c）。提取为空时回退默认字段 title / body / message。</p>
+          <input name="body_path" value="${escapeHtml(k.body_path || '')}" placeholder="如：$.event.message" />
+          <p class="hint">点分路径，数组用下标（$.a.b.0.c），$ 表示 JSON 本身可省略。提取为空时回退默认字段 title / body / message。</p>
         </div>
         <label class="check-row"><input type="checkbox" name="active" ${k.active ? 'checked' : ''}/> 启用此 key（停用后 webhook 调用将被拒绝，不推送消息）</label>
         <div class="modal-actions">
@@ -363,7 +363,7 @@ function renderAccount() {
       <p>API 地址：<code>${API_BASE}</code></p>
       <p>Webhook 模板：<code>${API_BASE}/hook/&lt;KEY&gt;</code></p>
       <p>调用方式：<code>GET</code> 或 <code>POST</code>（JSON / 表单 / 纯文本均可）</p>
-      <p class="hint">默认模式识别 title / body / message / text 字段；自定义模式在 Key 编辑里按 JSON 路径配置提取。</p>
+      <p class="hint">默认模式识别 title / body / message / text 字段；自定义模式按 JSON 路径提取，$ 表示 JSON 本身（如 $.msg）。</p>
     </div>`;
   $('#pw-form').onsubmit = async (e) => {
     e.preventDefault();

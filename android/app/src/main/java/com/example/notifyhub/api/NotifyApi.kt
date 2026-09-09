@@ -44,11 +44,11 @@ data class NotificationItem(
     val title: String?,
     val body: String?,
     val payload: String?,
-    val keyId: Long?,
-    val keyName: String?,
-    val createdAt: Long,
+    @SerializedName("key_id") val keyId: Long?,
+    @SerializedName("key_name") val keyName: String?,
+    @SerializedName("created_at") val createdAt: Long,
     val read: Int,
-    val deliveredAt: Long?
+    @SerializedName("delivered_at") val deliveredAt: Long?
 )
 data class NotifResp(val notifications: List<NotificationItem>, val total: Int)
 

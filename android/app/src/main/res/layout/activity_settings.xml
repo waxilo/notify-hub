@@ -11,49 +11,11 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <!-- 卡片：发送测试通知 -->
-        <LinearLayout
-            android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="18dp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-
-            <TextView
-                android:text="发送测试通知"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="@color/text_main"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-            <TextView
-                android:text="选择一个 key，通过真实 webhook 发送测试消息，验证链路与 App 收件。"
-                android:textSize="13sp"
-                android:textColor="@color/text_muted"
-                android:layout_marginTop="4dp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-            <Button
-                android:id="@+id/btnTestNotify"
-                android:text="选择 Key 并发送测试"
-                android:layout_marginTop="12dp"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-            <TextView
-                android:id="@+id/tvTestMsg"
-                android:textSize="13sp"
-                android:textColor="@color/ok_text"
-                android:layout_marginTop="8dp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-        </LinearLayout>
-
         <!-- 卡片：版本与更新 -->
         <LinearLayout
             android:orientation="vertical"
             android:background="@drawable/bg_card"
             android:padding="18dp"
-            android:layout_marginTop="12dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content">
 
