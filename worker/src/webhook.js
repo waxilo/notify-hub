@@ -1,9 +1,9 @@
 // 通用 webhook：GET/POST 均可，按 key 路由到对应用户并写入通知
 //   GET  /hook/:key?title=...&body=...&message=...[&dedup_key=...]
 //   POST /hook/:key  (JSON | form | 纯文本；防重 key 可用头 X-Dedup-Key 或字段 dedup_key)
-// 防重：仅在调用方显式传入 dedup_key 时生效（用于调用方超时重试场景），
+// 防重：仅在调用方显式传入 dedup_key 时做去重（用于调用方超时重试场景），
 // 同一 dedup_key 在 5 分钟窗口内只入库/推送一次，重复调用直接返回首条消息 id（deduplicated: true）。
-// 默认调用方消息不重复，不做内容哈希自动防重。
+// 每条消息未传 dedup_key 时由服务端生成唯一 key（srv-<uuid>），随 WS 推送下发，供 App 对重推消息判重。
 import { json, readJson, readText } from './utils.js';
 
 const DEDUP_WINDOW_MS = 300_000;
@@ -91,6 +91,9 @@ export async function handleWebhook(request, env, key) {
   if (title.length > 500) title = title.slice(0, 500);
   if (body.length > 8000) body = body.slice(0, 8000);
   if (dedupKey.length > 128) dedupKey = dedupKey.slice(0, 128);
+  // 每条消息都有防重 key：调用方未传时由服务端生成（UUID），随 WS 推送下发，
+  // App 端凭它对超时重推的消息做重复判断
+  if (!dedupKey) dedupKey = 'srv-' + crypto.randomUUID();
 
   await env.DB.prepare('UPDATE keys SET last_used=? WHERE id=?').bind(Date.now(), row.id).run();
 

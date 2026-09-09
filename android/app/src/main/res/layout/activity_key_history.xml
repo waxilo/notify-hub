@@ -69,11 +69,23 @@
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv"
+        android:layout_weight="1"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
         android:clipToPadding="false"
         android:paddingStart="12dp"
         android:paddingEnd="12dp"
         android:paddingTop="4dp"
-        android:paddingBottom="16dp" />
+        android:paddingBottom="8dp" />
+
+    <Button
+        android:id="@+id/btnMore"
+        android:text="加载更多"
+        android:textSize="13sp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="16dp"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
 </LinearLayout>

@@ -1,5 +1,6 @@
 package com.example.notifyhub.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
@@ -10,12 +11,16 @@ import androidx.lifecycle.lifecycleScope
 import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.ChangePwReq
+import com.example.notifyhub.data.TokenStore
 import com.example.notifyhub.data.UpdateChecker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class SettingsActivity : AppCompatActivity() {
+
+    private val loading by lazy { LoadingOverlay(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
@@ -27,7 +32,10 @@ class SettingsActivity : AppCompatActivity() {
         tvVersion.text = "当前版本：${UpdateChecker.installedVersionName(this)}（code ${UpdateChecker.installedVersionCode(this)}）"
         btnCheck.setOnClickListener {
             tvUpdate.text = "检查中…"
-            lifecycleScope.launch { checkUpdate(tvUpdate) }
+            loading.show()
+            lifecycleScope.launch {
+                try { checkUpdate(tvUpdate) } finally { loading.hide() }
+            }
         }
 
         // ---- 修改密码 ----
@@ -41,6 +49,7 @@ class SettingsActivity : AppCompatActivity() {
                 tvMsg.text = "新密码至少 6 位"
                 return@setOnClickListener
             }
+            loading.show()
             lifecycleScope.launch {
                 try {
                     Api.safe { Api.instance(this@SettingsActivity).changePassword(ChangePwReq(old, new)) }
@@ -51,9 +60,31 @@ class SettingsActivity : AppCompatActivity() {
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) { tvMsg.text = e.message ?: "修改失败" }
+                } finally {
+                    loading.hide()
                 }
             }
         }
+
+        // ---- 退出登录 ----
+        findViewById<Button>(R.id.btnLogout).setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("退出登录")
+                .setMessage("退出后将停止推送连接并清除登录状态，需要重新登录。")
+                .setPositiveButton("退出") { _, _ -> doLogout() }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+    }
+
+    private fun doLogout() {
+        // 清除登录态并停止前台推送服务（WS 断开、常驻通知移除）
+        TokenStore(this).clear()
+        stopService(Intent(this, com.example.notifyhub.data.PushService::class.java))
+        val i = Intent(this, LoginActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        startActivity(i)
+        finish()
     }
 
     override fun onResume() {

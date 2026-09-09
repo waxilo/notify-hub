@@ -62,7 +62,8 @@ interface NotifyApi {
     @PUT("/api/keys/{id}") suspend fun updateKey(@Path("id") id: Long, @Body req: UpdateKeyReq): Response<Unit>
     @DELETE("/api/keys/{id}") suspend fun revokeKey(@Path("id") id: Long): Response<Unit>
     @GET("/api/notifications") suspend fun listNotifications(
-        @Query("limit") limit: Int = 50,
+        @Query("limit") limit: Int = 10,
+        @Query("offset") offset: Int = 0,
         @Query("key_id") keyId: Long? = null
     ): NotifResp
     @POST("/api/notifications/{id}/read") suspend fun markRead(@Path("id") id: Long): Response<Unit>

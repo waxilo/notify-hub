@@ -38,6 +38,7 @@ class KeysActivity : AppCompatActivity() {
 
     private val keys = mutableListOf<KeyItem>()
     private lateinit var adapter: KeyAdapter
+    private val loading by lazy { LoadingOverlay(this) }
     private val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,6 +73,7 @@ class KeysActivity : AppCompatActivity() {
     }
 
     private fun loadKeys() {
+        loading.show()
         lifecycleScope.launch {
             try {
                 val list = Api.safe { Api.instance(this@KeysActivity).listKeys() }.keys
@@ -81,6 +83,8 @@ class KeysActivity : AppCompatActivity() {
             } catch (e: retrofit2.HttpException) {
                 if (e.code() == 401) backToLogin()
             } catch (_: Exception) {
+            } finally {
+                withContext(Dispatchers.Main) { loading.hide() }
             }
         }
     }
@@ -100,7 +104,7 @@ class KeysActivity : AppCompatActivity() {
             try {
                 val full = k.keyFull ?: throw IllegalStateException("缺少完整 key")
                 val base = ConfigStore(this@KeysActivity).apiBase.removeSuffix("/")
-                val json = """{"title":"Notify Hub 测试通知","body":"来自 App 的测试 · key「${k.name}」"}"""
+                val json = """{"title":"Notify Hub 测试通知","body":"来自 App 的测试"}"""
                 val req = Request.Builder()
                     .url("$base/hook/$full")
                     .post(json.toRequestBody("application/json".toMediaType()))

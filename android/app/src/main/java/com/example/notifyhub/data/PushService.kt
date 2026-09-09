@@ -195,9 +195,13 @@ class PushService : Service() {
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentIntent(pi)
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            .setOngoing(false)
             .setAutoCancel(true)
             .build()
-        nm.notify((id % Int.MAX_VALUE).toInt().coerceAtLeast(1), n)
+        // 通知 id 使用独立高位段，绝不与前台服务通知 id（1001）冲突：
+        // 一旦消息 id 撞上 FGS 通知 id，该通知会被系统按前台服务通知对待（一键清除无法移除）
+        nm.notify(messageNotifId(id), n)
         // 已触达回调：通知成功弹出到系统通知栏后，上报 Worker 修正该消息的触达状态
         if (id > 0) {
             CoroutineScope(Dispatchers.IO).launch {
@@ -210,6 +214,12 @@ class PushService : Service() {
         private const val PUSH_CHANNEL_ID = "notify_hub_push"
         const val FG_CHANNEL_ID = "notify_hub_foreground"
         const val FOREGROUND_ID = 1001
+        private const val MESSAGE_ID_BASE = 1_000_000  // 消息通知 id 段起点，避开 FGS 通知 id
         private const val DEDUP_WINDOW_MS = 3000L  // 防重缓存窗口：3 秒内同 key 只弹一次
+
+        // 服务端为每条消息生成唯一 dedup_key（srv-<uuid>），重推消息由本缓存判重；
+        // id 高位段映射，保证与前台服务通知 id 不冲突
+        fun messageNotifId(id: Long): Int =
+            (MESSAGE_ID_BASE + (id % MESSAGE_ID_BASE)).toInt().coerceAtLeast(1)
     }
 }

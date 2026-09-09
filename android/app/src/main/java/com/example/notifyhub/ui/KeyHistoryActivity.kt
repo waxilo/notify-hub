@@ -14,14 +14,13 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.NotificationItem
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 // 单个 key 的发送历史（只能从 key 卡片进入，不可切换 key）；
+// 分页加载：默认拉取最新 10 条，点击"加载更多"向后追加；
 // 触达状态以服务端 delivered_at 为准（App 弹出通知后回调修正）
 class KeyHistoryActivity : AppCompatActivity() {
 
@@ -33,11 +32,12 @@ class KeyHistoryActivity : AppCompatActivity() {
     )
 
     private val rows = mutableListOf<Row>()
+    private val loading by lazy { LoadingOverlay(this) }
     private lateinit var adapter: HistoryAdapter
-    private lateinit var tvKeyName: TextView
     private lateinit var tvMsg: TextView
+    private lateinit var btnMore: Button
     private var keyId: Long = -1L
-    private var keyLabel: String = ""
+    private var total = 0
 
     private val fmt = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault())
 
@@ -57,45 +57,39 @@ class KeyHistoryActivity : AppCompatActivity() {
         rv.layoutManager = LinearLayoutManager(this)
         rv.adapter = adapter
 
-        tvKeyName = findViewById(R.id.tvKeyName)
         tvMsg = findViewById(R.id.tvMsg)
+        btnMore = findViewById(R.id.btnMore)
+        btnMore.setOnClickListener { loadPage(append = true) }
         findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
-        findViewById<Button>(R.id.btnRefresh).setOnClickListener { refresh() }
+        findViewById<Button>(R.id.btnRefresh).setOnClickListener { loadPage(append = false) }
 
-        refresh()
+        loadPage(append = false)
     }
 
-    private fun refresh() {
+    private fun loadPage(append: Boolean) {
+        loading.show()
         lifecycleScope.launch {
             try {
-                // 拉取 key 名称用于标题展示
-                val k = Api.safe { Api.instance(this@KeyHistoryActivity).listKeys() }
-                    .keys.firstOrNull { it.id == keyId }
-                keyLabel = k?.name ?: "…${(k?.keyFull ?: k?.key ?: "").takeLast(6)}"
-                withContext(Dispatchers.Main) { tvKeyName.text = keyLabel }
-                loadHistory()
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { toast("加载失败：${e.message}") }
-            }
-        }
-    }
-
-    private suspend fun loadHistory() {
-        try {
-            val resp = Api.safe { Api.instance(this@KeyHistoryActivity).listNotifications(100, keyId) }
-            rows.clear()
-            resp.notifications.forEach { n ->
-                rows.add(
-                    if (n.deliveredAt != null) Row(n, "已触达", 0xFF17994F.toInt(), R.drawable.bg_chip_on)
-                    else Row(n, "未触达", 0xFFC07F00.toInt(), R.drawable.bg_chip_off)
-                )
-            }
-            withContext(Dispatchers.Main) {
-                tvMsg.text = "共 ${resp.total} 条（显示最近 ${rows.size} 条）"
+                val offset = if (append) rows.size else 0
+                if (!append) rows.clear()
+                val resp = Api.safe {
+                    Api.instance(this@KeyHistoryActivity).listNotifications(PAGE_SIZE, offset, keyId)
+                }
+                total = resp.total
+                resp.notifications.forEach { n ->
+                    rows.add(
+                        if (n.deliveredAt != null) Row(n, "已触达", 0xFF17994F.toInt(), R.drawable.bg_chip_on)
+                        else Row(n, "未触达", 0xFFC07F00.toInt(), R.drawable.bg_chip_off)
+                    )
+                }
+                tvMsg.text = "已显示 ${rows.size} / 共 $total 条"
                 adapter.notifyDataSetChanged()
+                btnMore.visibility = if (rows.size < total) View.VISIBLE else View.GONE
+            } catch (e: Exception) {
+                tvMsg.text = "加载失败：${e.message}"
+            } finally {
+                loading.hide()
             }
-        } catch (e: Exception) {
-            withContext(Dispatchers.Main) { tvMsg.text = "加载失败：${e.message}" }
         }
     }
 
@@ -127,5 +121,9 @@ class KeyHistoryActivity : AppCompatActivity() {
         }
 
         override fun getItemCount() = data.size
+    }
+
+    companion object {
+        private const val PAGE_SIZE = 10  // 默认查询最新 10 条
     }
 }

@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
 import { API_BASE } from './config.js';
-import { api, getToken, setToken, isLoggedIn } from './api.js';
+import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js';
 
 const $ = (sel) => document.querySelector(sel);
 const root = $('#app');
@@ -160,7 +160,7 @@ function openKeyCreate() {
           <button class="btn mini" data-newcopy="${escapeHtml(k.key)}">复制 Key</button><br/>
           <span class="hint">Webhook 地址</span><br/>
           <code>${API_BASE}/hook/${escapeHtml(k.key)}</code>
-          <button class="btn mini" data-newcopy="${API_BASE}/hook/${escapeHtml(k.key)}">复制地址</button>
+          <button class="btn mini" data-newcopy="${API_BASE}/hook/${escapeHtml(k.key)}">复制 Hook 地址</button>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn primary" id="create-done">完成</button>
@@ -184,15 +184,14 @@ async function loadList() {
           <span class="key-name">${escapeHtml(k.name)}</span>
           <span class="badge ${k.active ? 'on' : 'off'}">${k.active ? '启用中' : '已停用'}</span>
           <span class="badge mode">${k.mode === 'custom' ? '自定义' : '默认'}</span>
-          <code class="key-url">${API_BASE}/hook/${escapeHtml(k.key)}</code>
+          <code class="key-url">${escapeHtml(k.keyFull || k.key)}</code>
         </div>
         <div class="key-sub">
           <span class="hint">最近使用：${k.last_used ? new Date(k.last_used).toLocaleString() : '从未使用'}</span>
           ${k.mode === 'custom' ? `<span class="hint">title← ${escapeHtml(k.title_path || '(未配置)')}　body← ${escapeHtml(k.body_path || '(未配置)')}</span>` : ''}
         </div>
         <div class="key-actions" aria-label="操作">
-          <button class="btn mini" data-copykey="${k.id}">复制 Key</button>
-          <button class="btn mini" data-copyurl="${k.id}">复制地址</button>
+          <button class="btn mini" data-copyurl="${k.id}">复制 Hook 地址</button>
           <button class="btn mini" data-test="${k.id}" ${k.active ? '' : 'disabled'}>测试</button>
           <button class="btn mini" data-history="${k.id}">历史</button>
           <button class="btn mini" data-edit="${k.id}">编辑</button>
@@ -202,9 +201,6 @@ async function loadList() {
     <p class="msg" id="test-msg"></p>`;
 
     const find = (id) => keys.find((x) => String(x.id) === id);
-    box.querySelectorAll('[data-copykey]').forEach((b) => {
-      b.onclick = () => { const k = find(b.dataset.copykey); if (k) copyText(k.keyFull || k.key, b); };
-    });
     box.querySelectorAll('[data-copyurl]').forEach((b) => {
       b.onclick = () => { const k = find(b.dataset.copyurl); if (k) copyText(`${API_BASE}/hook/${k.keyFull || k.key}`, b); };
     });
@@ -215,23 +211,24 @@ async function loadList() {
       b.onclick = async () => { await api.updateKey(b.dataset.enable, { active: true }); loadList(); };
     });
     box.querySelectorAll('[data-history]').forEach((b) => {
-      b.onclick = () => { const k = find(b.dataset.history); if (k) renderKeyHistory(k); };
+      b.onclick = () => { const k = find(b.dataset.history); if (k) openKeyHistory(k); };
     });
     box.querySelectorAll('[data-edit]').forEach((b) => {
       b.onclick = () => { const k = find(b.dataset.edit); if (k) openKeyEdit(k); };
     });
-    box.querySelectorAll('[data-test]').forEach((b) => {
+      box.querySelectorAll('[data-test]').forEach((b) => {
       b.onclick = async () => {
         const k = find(b.dataset.test);
         if (!k) return;
         const msg = $('#test-msg');
         msg.textContent = '';
         b.disabled = true; b.textContent = '发送中…';
+        loadingPush();
         try {
           const res = await fetch(`${API_BASE}/hook/${encodeURIComponent(k.keyFull)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: 'Notify Hub 测试通知', body: `来自 Web 控制台的测试 · key「${k.name}」· ${new Date().toLocaleString()}` }),
+            body: JSON.stringify({ title: 'Notify Hub 测试通知', body: '来自 Web 控制台的测试' }),
           });
           const data = await res.json().catch(() => ({}));
           msg.textContent = res.ok
@@ -240,6 +237,7 @@ async function loadList() {
         } catch (err) {
           msg.textContent = `❌ 网络错误：${err.message}`;
         } finally {
+          loadingPop();
           b.disabled = false; b.textContent = '测试';
         }
       };
@@ -299,46 +297,69 @@ function openKeyEdit(k) {
   };
 }
 
-/* ---------- 按 key 历史 ---------- */
+/* ---------- 按 key 历史（弹窗 + 分页） ---------- */
 
-async function renderKeyHistory(k) {
-  const old = $('#key-history');
-  if (old) old.remove();
-  const view = $('#view-keys');
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.id = 'key-history';
-  card.innerHTML = `
-    <div class="card-head">
-      <h2>「${escapeHtml(k.name)}」发送历史</h2>
-      <button class="btn mini" id="hist-back">返回</button>
+const HIST_PAGE_SIZE = 10;
+
+async function openKeyHistory(k) {
+  const root_ = $('#modal-root');
+  let page = 0;
+
+  root_.innerHTML = `
+  <div class="modal-mask">
+    <div class="modal card" style="max-width:640px;">
+      <div class="card-head">
+        <h2>「${escapeHtml(k.name)}」发送历史</h2>
+        <button class="btn mini" id="hist-close">关闭</button>
+      </div>
+      <p class="hint">状态说明：<b class="ok">已触达</b> = App 已弹出系统通知；<b class="warn">未触达</b> = App 离线尚未接收</p>
+      <div id="hist-body"><p class="hint">加载中…</p></div>
+      <div class="modal-actions" id="hist-pager" style="justify-content:space-between;align-items:center;">
+        <span class="hint" id="hist-total"></span>
+        <span>
+          <button class="btn mini" id="hist-prev">← 上一页</button>
+          <button class="btn mini" id="hist-next">下一页 →</button>
+        </span>
+      </div>
     </div>
-    <p class="hint">状态说明：<b class="ok">已触达</b> = App 已弹出系统通知；<b class="warn">未触达</b> = App 离线尚未接收</p>
-    <div id="hist-body"><p class="hint">加载中…</p></div>`;
-  view.appendChild(card);
-  card.scrollIntoView({ behavior: 'smooth' });
-  $('#hist-back').onclick = () => card.remove();
-  const body = $('#hist-body');
-  try {
-    const { notifications, total } = await api.listNotifications(k.id);
-    if (!notifications.length) { body.innerHTML = '<p class="hint">该 key 还没有发送记录。</p>'; return; }
-    body.innerHTML = `
-      <p class="hint">共 ${total} 条，显示最近 ${notifications.length} 条</p>
-      <table>
-        <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th></tr></thead>
-        <tbody>${notifications.map((n) => `
-          <tr>
-            <td>${escapeHtml(n.title)}</td>
-            <td>${escapeHtml((n.body || '').slice(0, 80))}</td>
-            <td>${new Date(n.created_at).toLocaleString()}</td>
-            <td>${n.delivered_at
-              ? `<b class="ok">已触达</b><br/><span class="hint xs">${new Date(n.delivered_at).toLocaleString()}</span>`
-              : '<b class="warn">未触达</b>'}</td>
-          </tr>`).join('')}</tbody>
-      </table>`;
-  } catch (err) {
-    body.innerHTML = `<p class="msg">加载失败：${err.message}</p>`;
+  </div>`;
+  $('#hist-close').onclick = () => { root_.innerHTML = ''; };
+
+  async function loadPage() {
+    const body = $('#hist-body');
+    body.innerHTML = '<p class="hint">加载中…</p>';
+    try {
+      const { notifications, total } = await api.listNotifications(k.id, HIST_PAGE_SIZE, page * HIST_PAGE_SIZE);
+      const pages = Math.max(1, Math.ceil(total / HIST_PAGE_SIZE));
+      if (!notifications.length) {
+        body.innerHTML = '<p class="hint">该 key 还没有发送记录。</p>';
+        $('#hist-pager').style.display = 'none';
+        return;
+      }
+      body.innerHTML = `
+        <table>
+          <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th></tr></thead>
+          <tbody>${notifications.map((n) => `
+            <tr>
+              <td>${escapeHtml(n.title)}</td>
+              <td>${escapeHtml((n.body || '').slice(0, 80))}</td>
+              <td>${new Date(n.created_at).toLocaleString()}</td>
+              <td>${n.delivered_at
+                ? `<b class="ok">已触达</b><br/><span class="hint xs">${new Date(n.delivered_at).toLocaleString()}</span>`
+                : '<b class="warn">未触达</b>'}</td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+      $('#hist-total').textContent = `共 ${total} 条 · 第 ${page + 1} / ${pages} 页`;
+      $('#hist-prev').disabled = page <= 0;
+      $('#hist-next').disabled = page >= pages - 1;
+    } catch (err) {
+      body.innerHTML = `<p class="msg">加载失败：${err.message}</p>`;
+    }
   }
+
+  $('#hist-prev').onclick = () => { if (page > 0) { page--; loadPage(); } };
+  $('#hist-next').onclick = () => { page++; loadPage(); };
+  loadPage();
 }
 
 /* ---------- 账号 ---------- */

@@ -16,6 +16,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class LoginActivity : AppCompatActivity() {
+
+    private val loading by lazy { LoadingOverlay(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -42,6 +45,7 @@ class LoginActivity : AppCompatActivity() {
             msg.text = "用户名必填，密码至少 6 位"
             return
         }
+        loading.show()
         lifecycleScope.launch {
             try {
                 val api = Api.instance(this@LoginActivity)
@@ -51,6 +55,8 @@ class LoginActivity : AppCompatActivity() {
                 finish()
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) { msg.text = e.message ?: "请求失败" }
+            } finally {
+                loading.hide()
             }
         }
     }

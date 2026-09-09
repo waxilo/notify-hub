@@ -96,6 +96,41 @@
                 android:layout_height="wrap_content" />
         </LinearLayout>
 
+        <!-- 卡片：账号 -->
+        <LinearLayout
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="18dp"
+            android:layout_marginTop="12dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <TextView
+                android:text="账号"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_main"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+
+            <Button
+                android:id="@+id/btnLogout"
+                android:text="退出登录"
+                android:textColor="@color/danger"
+                android:background="@drawable/bg_btn"
+                android:layout_marginTop="12dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:id="@+id/tvLogoutMsg"
+                android:textSize="13sp"
+                android:textColor="@color/danger"
+                android:layout_marginTop="8dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
         <Space android:layout_width="match_parent" android:layout_height="16dp" />
     </LinearLayout>
 </ScrollView>
