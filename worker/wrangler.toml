@@ -1,12 +1,28 @@
 name = "notify-hub-worker"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
+account_id = "33d023f61ebac424923f7285f9b142f8"
 
-# D1 数据库绑定（database_id 在 `wrangler d1 create notify-hub` 后填）
+# 自定义域名（zone sloan.dpdns.org 需在当前 Cloudflare 账号内）
+routes = [
+  { pattern = "notify-hub-worker.sloan.dpdns.org", custom_domain = true }
+]
+
+# D1 数据库绑定
 [[d1_databases]]
 binding = "DB"
 database_name = "notify-hub"
-database_id = "REPLACE_WITH_YOUR_D1_ID"
+database_id = "2f5cf556-d3dd-4047-a55a-6c6613058c17"
+
+# Durable Objects：WebSocket 实时推送（SQLite-backed，免费额度可用）
+[durable_objects]
+bindings = [
+  { name = "PUSH_HUB", class_name = "PushHub" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PushHub"]
 
 # JWT_SECRET 属于密钥，请用命令设置，不要写在这里：
 #   wrangler secret put JWT_SECRET

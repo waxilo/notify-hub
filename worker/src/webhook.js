@@ -52,5 +52,20 @@ export async function handleWebhook(request, env, key) {
     'INSERT INTO notifications (user_id, key_id, title, body, payload, created_at, read) VALUES (?,?,?,?,?,?,0)'
   ).bind(row.user_id, row.id, title, body, payload, Date.now()).run();
 
+  // 实时推送：经 Durable Object 广播给该用户的在线 WebSocket 连接（失败不影响入库结果）
+  try {
+    const stub = env.PUSH_HUB.get(env.PUSH_HUB.idFromName(String(row.user_id)));
+    const msg = JSON.stringify({
+      type: 'notification',
+      id: res.meta.last_row_id,
+      title,
+      body,
+      created_at: Date.now(),
+    });
+    await stub.fetch('https://do/notify', { method: 'POST', body: msg });
+  } catch {
+    // 离线客户端依赖 D1 + 轮询/重连后拉取兜底
+  }
+
   return json({ ok: true, id: res.meta.last_row_id }, 201);
 }

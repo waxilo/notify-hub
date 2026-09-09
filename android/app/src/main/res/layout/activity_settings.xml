@@ -16,7 +16,7 @@
             android:layout_height="wrap_content" />
         <EditText
             android:id="@+id/etApi"
-            android:hint="https://notify-hub-worker.xxx.workers.dev"
+            android:hint="https://notify-hub-worker.sloan.dpdns.org"
             android:inputType="textUri"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
@@ -38,6 +38,34 @@
             android:id="@+id/btnSaveCfg"
             android:text="保存配置"
             android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#dddddd"
+            android:layout_marginVertical="16dp" />
+
+        <TextView
+            android:text="发送测试通知"
+            android:textStyle="bold"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+        <TextView
+            android:text="选择一个 key，通过真实 webhook 发送测试消息，验证链路与 App 收件。"
+            android:textSize="13sp"
+            android:textColor="#7b8794"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+        <Button
+            android:id="@+id/btnTestNotify"
+            android:text="选择 Key 并发送测试"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <TextView
+            android:id="@+id/tvTestMsg"
+            android:textColor="#1f7a3d"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
         <View

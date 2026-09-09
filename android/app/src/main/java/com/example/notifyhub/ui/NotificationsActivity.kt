@@ -1,9 +1,14 @@
 package com.example.notifyhub.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -11,6 +16,7 @@ import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.NotificationItem
 import com.example.notifyhub.data.ConfigStore
+import com.example.notifyhub.data.PushService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -20,6 +26,9 @@ import kotlinx.coroutines.withContext
 class NotificationsActivity : AppCompatActivity() {
     private lateinit var adapter: NotificationAdapter
     private var polling = false
+
+    private val notifPermLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,6 +43,19 @@ class NotificationsActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
         findViewById<Button>(R.id.btnRefresh).setOnClickListener { loadOnce() }
+
+        ensureNotificationPermission()
+        // 启动前台服务：WebSocket 长连接，收到推送立即弹系统通知（替代纯轮询）
+        ContextCompat.startForegroundService(this, Intent(this, PushService::class.java))
+    }
+
+    private fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     override fun onResume() {

@@ -25,14 +25,11 @@ class LoginActivity : AppCompatActivity() {
         val msg = findViewById<TextView>(R.id.tvMsg)
 
         findViewById<Button>(R.id.btnLogin).setOnClickListener {
-            doAuth(user.text.toString(), pass.text.toString(), false, msg)
-        }
-        findViewById<Button>(R.id.btnRegister).setOnClickListener {
-            doAuth(user.text.toString(), pass.text.toString(), true, msg)
+            doLogin(user.text.toString(), pass.text.toString(), msg)
         }
     }
 
-    private fun doAuth(username: String, password: String, register: Boolean, msg: TextView) {
+    private fun doLogin(username: String, password: String, msg: TextView) {
         if (username.isBlank() || password.length < 6) {
             msg.text = "用户名必填，密码至少 6 位"
             return
@@ -40,8 +37,7 @@ class LoginActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val api = Api.instance(this@LoginActivity)
-                val resp = if (register) api.register(CredReq(username, password))
-                else api.login(CredReq(username, password))
+                val resp = api.login(CredReq(username, password))
                 TokenStore(this@LoginActivity).token = resp.token
                 startActivity(Intent(this@LoginActivity, NotificationsActivity::class.java))
                 finish()

@@ -4,6 +4,10 @@ import { register, login, changePassword, verifyJWT } from './auth.js';
 import { createKey, listKeys, revokeKey } from './keys.js';
 import { listNotifications, getNotification, markRead, deleteNotification } from './notifications.js';
 import { handleWebhook } from './webhook.js';
+import { PushHub } from './push.js';
+
+// Durable Object 类必须从主入口导出
+export { PushHub };
 
 async function getUserId(request, env) {
   const auth = request.headers.get('Authorization') || '';
@@ -36,6 +40,19 @@ export default {
     const m = pathname.match(/^\/hook\/([\w-]+)$/);
     if (m && (request.method === 'GET' || request.method === 'POST')) {
       return handleWebhook(request, env, m[1]);
+    }
+
+    // ---- WebSocket 实时推送（JWT 鉴权，token 走 query 或 Authorization）----
+    if (pathname === '/ws' && request.method === 'GET') {
+      const url = new URL(request.url);
+      const auth = request.headers.get('Authorization') || '';
+      const token = url.searchParams.get('token')
+        || (auth.startsWith('Bearer ') ? auth.slice(7) : '');
+      if (!token) return json({ error: 'missing token' }, 401);
+      const payload = await verifyJWT(token, env.JWT_SECRET);
+      if (!payload) return json({ error: 'unauthorized' }, 401);
+      const id = env.PUSH_HUB.idFromName(payload.sub);
+      return env.PUSH_HUB.get(id).fetch(new Request('https://do/connect', request));
     }
 
     if (pathname.startsWith('/api/')) {

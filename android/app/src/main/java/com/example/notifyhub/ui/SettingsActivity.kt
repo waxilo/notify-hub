@@ -5,6 +5,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.notifyhub.R
@@ -14,6 +15,10 @@ import com.example.notifyhub.data.ConfigStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,6 +35,10 @@ class SettingsActivity : AppCompatActivity() {
             cfg.apiBase = etApi.text.toString().trim()
             cfg.pollIntervalMs = (etPoll.text.toString().toLongOrNull() ?: 10) * 1000
             Toast.makeText(this, "配置已保存", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<Button>(R.id.btnTestNotify).setOnClickListener {
+            lifecycleScope.launch { pickKeyAndTest() }
         }
 
         val etOld = findViewById<EditText>(R.id.etOld)
@@ -54,6 +63,53 @@ class SettingsActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) { tvMsg.text = e.message ?: "修改失败" }
                 }
             }
+        }
+    }
+
+    private suspend fun pickKeyAndTest() {
+        val tvTest = findViewById<TextView>(R.id.tvTestMsg)
+        try {
+            val keys = Api.safe { Api.instance(this).listKeys() }.keys.filter { it.active == 1 }
+            withContext(Dispatchers.Main) {
+                if (keys.isEmpty()) {
+                    tvTest.text = "还没有启用的 key，请先到 Web 控制台生成"
+                    return@withContext
+                }
+                val names = keys.map { "${it.name}（…${it.key.takeLast(4)}）" }.toTypedArray()
+                AlertDialog.Builder(this@SettingsActivity)
+                    .setTitle("选择要测试的 Key")
+                    .setItems(names) { _, i -> lifecycleScope.launch { sendTest(keys[i]) } }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) { tvTest.text = "获取 key 列表失败：${e.message}" }
+        }
+    }
+
+    private suspend fun sendTest(key: com.example.notifyhub.api.KeyItem) {
+        val tvTest = findViewById<TextView>(R.id.tvTestMsg)
+        withContext(Dispatchers.Main) { tvTest.text = "发送中…" }
+        try {
+            val full = key.keyFull
+                ?: throw IllegalStateException("缺少完整 key（请更新 App 或到 Web 控制台测试）")
+            val base = ConfigStore(this).apiBase.removeSuffix("/")
+            val json = """{"title":"Notify Hub 测试通知","body":"来自 App 的测试 · key「${key.name}」"}"""
+            val req = Request.Builder()
+                .url("$base/hook/$full")
+                .post(json.toRequestBody("application/json".toMediaType()))
+                .build()
+            val resp = Api.safe { OkHttpClient().newCall(req).execute() }
+            resp.use { r ->
+                val body = r.body?.string().orEmpty()
+                withContext(Dispatchers.Main) {
+                    tvTest.text = if (r.isSuccessful)
+                        "✅ 测试已送达「${key.name}」，请到通知收件箱查看"
+                    else "❌ 发送失败（HTTP ${r.code}）：$body"
+                }
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) { tvTest.text = "❌ 发送失败：${e.message}" }
         }
     }
 }

@@ -49,18 +49,40 @@ async function mainView() {
     <strong>Notify Hub</strong>
     <div>
       <button id="tab-keys" class="active">密钥管理</button>
+      <button id="tab-app">App 下载</button>
       <button id="tab-acct">账号设置</button>
       <button id="logout">退出</button>
     </div>
   </header>
   <main>
     <section id="view-keys"></section>
+    <section id="view-app" hidden></section>
     <section id="view-acct" hidden></section>
   </main>`;
-  $('#tab-keys').onclick = () => { $('#tab-keys').classList.add('active'); $('#tab-acct').classList.remove('active'); $('#view-keys').hidden = false; $('#view-acct').hidden = true; };
-  $('#tab-acct').onclick = () => { $('#tab-acct').classList.add('active'); $('#tab-keys').classList.remove('active'); $('#view-acct').hidden = true; $('#view-keys').hidden = false; renderAccount(); };
+  $('#tab-keys').onclick = () => switchTab('tab-keys', 'view-keys');
+  $('#tab-app').onclick = () => { switchTab('tab-app', 'view-app'); renderAppDownload(); };
+  $('#tab-acct').onclick = () => { switchTab('tab-acct', 'view-acct'); renderAccount(); };
   $('#logout').onclick = () => { setToken(null); authView(); };
   renderKeys();
+}
+
+function switchTab(tabId, viewId) {
+  ['tab-keys', 'tab-app', 'tab-acct'].forEach((t) => $('#' + t).classList.remove('active'));
+  $('#' + tabId).classList.add('active');
+  ['view-keys', 'view-app', 'view-acct'].forEach((v) => { $('#' + v).hidden = v !== viewId; });
+}
+
+function renderAppDownload() {
+  const view = $('#view-app');
+  const APK_URL = 'https://github.com/waxilo/notify-hub/releases/latest/download/app-debug.apk';
+  view.innerHTML = `
+    <div class="card">
+      <h2>下载安卓 App</h2>
+      <p>最新版 APK 由 CI 自动构建并发布：</p>
+      <p><a class="button primary" href="${APK_URL}">下载最新 APK（app-debug.apk）</a></p>
+      <p class="hint">手机浏览器打开本页点击下载；安装时如提示"未知来源"，允许即可。</p>
+      <p>历史版本见 <a href="https://github.com/waxilo/notify-hub/releases" target="_blank" rel="noopener">GitHub Releases</a>。</p>
+    </div>`;
 }
 
 async function renderKeys() {
@@ -101,18 +123,47 @@ async function loadList() {
     const { keys } = await api.listKeys();
     if (!keys.length) { box.innerHTML = '<p>还没有 key，先生成一个。</p>'; return; }
     box.innerHTML = `<table>
-      <thead><tr><th>名称</th><th>Key</th><th>状态</th><th>最近使用</th><th></th></tr></thead>
+      <thead><tr><th>名称</th><th>Key</th><th>状态</th><th>最近使用</th><th>操作</th></tr></thead>
       <tbody>${keys.map((k) => `
         <tr>
           <td>${escapeHtml(k.name)}</td>
           <td><code>${escapeHtml(k.key)}</code></td>
           <td>${k.active ? '启用' : '已吊销'}</td>
           <td>${k.last_used ? new Date(k.last_used).toLocaleString() : '—'}</td>
-          <td>${k.active ? `<button data-revoke="${k.id}">吊销</button>` : ''}</td>
+          <td>
+            ${k.active ? `<button data-test="${k.id}">测试</button>` : ''}
+            ${k.active ? `<button data-revoke="${k.id}">吊销</button>` : ''}
+          </td>
         </tr>`).join('')}</tbody>
-    </table>`;
+    </table>
+    <p class="msg" id="test-msg"></p>`;
     box.querySelectorAll('[data-revoke]').forEach((b) => {
       b.onclick = async () => { await api.revokeKey(b.dataset.revoke); loadList(); };
+    });
+    box.querySelectorAll('[data-test]').forEach((b) => {
+      b.onclick = async () => {
+        const k = keys.find((x) => String(x.id) === b.dataset.test);
+        if (!k) return;
+        const msg = $('#test-msg');
+        msg.textContent = '';
+        b.disabled = true; b.textContent = '发送中…';
+        try {
+          const res = await fetch(`${API_BASE}/hook/${encodeURIComponent(k.keyFull)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: 'Notify Hub 测试通知', body: `来自 Web 控制台的测试 · key「${k.name}」· ${new Date().toLocaleString()}` }),
+          });
+          const data = await res.json().catch(() => ({}));
+          msg.textContent = res.ok
+            ? `✅ 测试已送达「${k.name}」（通知 id: ${data.id}），App 收件箱稍后可见`
+            : `❌ 发送失败（HTTP ${res.status}）：${data.error || '未知错误'}`;
+          if (res.ok) loadList();
+        } catch (err) {
+          msg.textContent = `❌ 网络错误：${err.message}`;
+        } finally {
+          b.disabled = false; b.textContent = '测试';
+        }
+      };
     });
   } catch (err) { box.innerHTML = `<p class="msg">${err.message}</p>`; }
 }

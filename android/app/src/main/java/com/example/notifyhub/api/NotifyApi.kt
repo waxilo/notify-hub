@@ -23,6 +23,7 @@ data class KeyItem(
     val id: Long,
     val name: String?,
     val key: String,
+    val keyFull: String?,
     val createdAt: Long?,
     val lastUsed: Long?,
     val active: Int
@@ -68,7 +69,9 @@ object Api {
     private var baseUrl: String = ""
 
     fun instance(context: android.content.Context): NotifyApi {
-        val url = ConfigStore(context).apiBase
+        // Retrofit 要求 baseUrl 以 / 结尾（ConfigStore 存储时去掉了末尾斜杠）
+        val raw = ConfigStore(context).apiBase
+        val url = if (raw.endsWith("/")) raw else "$raw/"
         if (retrofit == null || baseUrl != url) {
             baseUrl = url
             val client = OkHttpClient.Builder()
