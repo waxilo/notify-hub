@@ -70,10 +70,13 @@ jobs:
             # 更新元数据并强制非草稿（草稿无法按 tag 名操作，必须用 id）
             gh api -X PATCH "repos/$REPO/releases/$REL_ID" \
               -f name="$REL_NAME" -f body="$NOTES" -F draft=false
-            # 上传新 APK（需要显式 Content-Type）
-            gh api -X POST "repos/$REPO/releases/$REL_ID/assets?name=app-debug.apk" \
+            # 上传新 APK（curl 直连 uploads.github.com，gh api 对该上传端点有 404 问题）
+            curl -sS -f -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
               -H "Content-Type: application/vnd.android.package-archive" \
-              --input "$ASSET"
+              --data-binary @"$ASSET" \
+              "https://uploads.github.com/repos/$REPO/releases/$REL_ID/assets?name=app-debug.apk" \
+              > /dev/null
           else
             gh release create latest "$ASSET" \
               --repo "$REPO" \
