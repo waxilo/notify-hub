@@ -118,25 +118,24 @@ function renderDocs() {
   // 代码样例（raw 文本单独保存，供复制按钮使用）
   const samples = [
     // 0: GET 一键通知
-    `${API_BASE}/hook/<KEY>?title=服务器告警&body=CPU 使用率超过 90%`,
+    `${API_BASE}/hook/<KEY>?message=CPU 使用率超过 90%`,
     // 1: curl GET
-    `curl "${API_BASE}/hook/<KEY>?title=${encodeURIComponent('服务器告警')}&body=${encodeURIComponent('CPU 使用率超过 90%')}"`,
+    `curl "${API_BASE}/hook/<KEY>?message=${encodeURIComponent('CPU 使用率超过 90%')}"`,
     // 2: curl POST JSON
     `curl -X POST "${API_BASE}/hook/<KEY>" \\
   -H "Content-Type: application/json" \\
-  -d '{"title":"服务器告警","body":"CPU 使用率超过 90%"}'`,
+  -d '{"message":"CPU 使用率超过 90%"}'`,
     // 3: JS fetch
     `fetch('${API_BASE}/hook/<KEY>', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ title: '服务器告警', body: 'CPU 使用率超过 90%' })
+  body: JSON.stringify({ message: 'CPU 使用率超过 90%' })
 });`,
     // 4: Python requests
     `import requests
 
 requests.post('${API_BASE}/hook/<KEY>', json={
-    'title': '服务器告警',
-    'body': 'CPU 使用率超过 90%',
+    'message': 'CPU 使用率超过 90%',
 })`,
     // 5: 自定义模式 payload
     `// 第三方系统原样 POST 的 payload（不需要改造它）：
@@ -158,7 +157,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
   view.innerHTML = `
     <div class="card doc-card">
       <h2><span class="doc-num">1</span>一键通知 · 30 秒接入</h2>
-      <p class="hint">在「Key 管理」创建一个 key，把它拼进下面的地址即可。浏览器地址栏直接回车、img 标签、脚本请求都行——最简单的推送不需要写任何代码。</p>
+      <p class="hint">在「Key 管理」创建一个 key，把它拼进下面的地址即可。<b>通知标题就是 key 的名称</b>（在 Key 管理里改名即可），所以调用只需一个 message 参数——浏览器地址栏直接回车、img 标签、脚本请求都行，最简单的推送不需要写任何代码。</p>
       <div class="doc-code"><code>${escapeHtml(samples[0])}</code><button class="btn mini doc-copy">复制</button></div>
       <p class="hint">或用 curl：</p>
       <div class="doc-code"><code>${escapeHtml(samples[1])}</code><button class="btn mini doc-copy">复制</button></div>
@@ -176,11 +175,11 @@ requests.post('${API_BASE}/hook/<KEY>', json={
       <table class="doc-params">
         <thead><tr><th>参数</th><th>说明</th></tr></thead>
         <tbody>
-          <tr><td><code>title</code></td><td>通知标题（最长 500 字符）</td></tr>
-          <tr><td><code>body</code> / <code>message</code> / <code>text</code></td><td>通知内容，按此顺序取第一个非空值（最长 8000 字符）</td></tr>
+          <tr><td><code>message</code></td><td>通知内容（最长 8000 字符）。旧参数 <code>body</code> / <code>text</code> 仍兼容，按此顺序取第一个非空值</td></tr>
           <tr><td><code>dedup_key</code></td><td>可选。显式防重 key：5 分钟窗口内相同 key 只推送一次（用于调用方超时重试场景）。不传则服务端自动生成唯一 key，消息不做内容去重</td></tr>
         </tbody>
       </table>
+      <p class="hint"><b>不需要传 title</b>：通知标题固定为 key 的名称。自定义模式下仍可通过 title_path 从 payload 提取标题覆盖。</p>
       <p class="hint">表单模式下参数相同；防重 key 也可放在请求头 <code>X-Dedup-Key</code> 中。GET 与 POST 语义一致，仅 GET 用查询串传参。</p>
     </div>
 
@@ -189,7 +188,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
       <p class="hint">监控、CI 等第三方系统推送的 JSON 往往字段固定且不是 title / body。给 key 开启「自定义模式」并配置提取路径后，可以把这类 payload <b>原样转发</b>，由服务端提取标题和内容——无需改造调用方。</p>
       <p class="hint">路径语法：点分路径，数组用下标；<code>$</code> 表示 JSON 本身（可省略前缀），<code>$</code> 单独使用时表示整个 JSON 字符串。示例：</p>
       <div class="doc-code"><code>${escapeHtml(samples[5])}</code><button class="btn mini doc-copy">复制</button></div>
-      <p class="hint">提取结果为空时自动回退默认字段（title / body / message），所以两种 payload 可以混用同一个 key。在「Key 管理 → 编辑」中切换模式并填写 title_path / body_path。</p>
+      <p class="hint">提取结果为空时自动回退：标题回退 key 名称，内容回退 message 参数，所以两种 payload 可以混用同一个 key。在「Key 管理 → 编辑」中切换模式并填写 title_path / body_path。</p>
     </div>
 
     <div class="card doc-card">
@@ -213,7 +212,7 @@ async function renderKeys() {
         <h2>我的 Key</h2>
         <button class="btn primary" id="btn-new-key">＋ 新建 Key</button>
       </div>
-      <p class="hint" style="margin-top:-6px;margin-bottom:12px;">默认模式识别 title / body / message 字段；自定义模式按 JSON 路径提取，$ 表示 JSON 本身（如 $.msg）。</p>
+      <p class="hint" style="margin-top:-6px;margin-bottom:12px;">通知标题固定为 key 名称，调用只需传 message 参数；自定义模式按 JSON 路径提取，$ 表示 JSON 本身（如 $.msg）。接入方式见「接入文档」。</p>
       <div id="key-list"><p class="hint">加载中…</p></div>
     </div>`;
   $('#btn-new-key').onclick = () => openKeyCreate();
@@ -323,7 +322,7 @@ async function loadList() {
           const res = await fetch(`${API_BASE}/hook/${encodeURIComponent(k.keyFull)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: 'Notify Hub 测试通知', body: '来自 Web 控制台的测试' }),
+            body: JSON.stringify({ message: '来自 Web 控制台的测试' }),
           });
           const data = await res.json().catch(() => ({}));
           msg.textContent = res.ok
@@ -479,7 +478,7 @@ function renderAccount() {
       <p>API 地址：<code>${API_BASE}</code></p>
       <p>Webhook 模板：<code>${API_BASE}/hook/&lt;KEY&gt;</code></p>
       <p>调用方式：<code>GET</code> 或 <code>POST</code>（JSON / 表单 / 纯文本均可）</p>
-      <p class="hint">默认模式识别 title / body / message / text 字段；自定义模式按 JSON 路径提取，$ 表示 JSON 本身（如 $.msg）。</p>
+      <p class="hint">默认模式只需传 message 参数（标题固定为 key 名称）；自定义模式按 JSON 路径提取，$ 表示 JSON 本身（如 $.msg）。详见「接入文档」。</p>
     </div>`;
   $('#pw-form').onsubmit = async (e) => {
     e.preventDefault();

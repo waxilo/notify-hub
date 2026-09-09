@@ -104,7 +104,7 @@ class KeysActivity : AppCompatActivity() {
             try {
                 val full = k.keyFull ?: throw IllegalStateException("缺少完整 key")
                 val base = ConfigStore(this@KeysActivity).apiBase.removeSuffix("/")
-                val json = """{"title":"Notify Hub 测试通知","body":"来自 App 的测试"}"""
+                val json = """{"message":"来自 App 的测试"}"""
                 val req = Request.Builder()
                     .url("$base/hook/$full")
                     .post(json.toRequestBody("application/json".toMediaType()))
