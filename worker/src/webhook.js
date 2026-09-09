@@ -39,7 +39,7 @@ function extractByPath(obj, path) {
 }
 
 export async function handleWebhook(request, env, key) {
-  const row = await env.DB.prepare('SELECT id, name, user_id, active, mode FROM keys WHERE key=?').bind(key).first();
+  const row = await env.DB.prepare('SELECT id, name, user_id, active, mode, template FROM keys WHERE key=?').bind(key).first();
   if (!row) return json({ error: 'invalid key' }, 404);
   // 禁用状态的 key 不接收、不入库、不推送
   if (!row.active) return json({ error: 'key is disabled' }, 403);
@@ -85,12 +85,14 @@ export async function handleWebhook(request, env, key) {
     payload = JSON.stringify(obj);
   }
 
-  // 自定义模式：
-  //   1) 传了 message → 作为模板，${路径} 占位符用 JSON 数据填充（取不到的字段替换为空串）
-  //   2) 未传 message → 整个 JSON 直接作为内容触达
+  // 自定义模式（模板解析），优先级：
+  //   1) 调用方传了 message → 作为模板，${路径} 占位符用 JSON 数据填充（取不到的字段替换为空串）
+  //   2) 未传 message 但 key 上配置了模板（编辑弹窗的「消息模板」输入框）→ 用 key 模板渲染
+  //   3) 都没有 → 整个 JSON 直接作为内容触达
   if (row.mode === 'custom' && payloadObj && typeof payloadObj === 'object') {
-    if (body) {
-      body = body.replace(/\$\{([^}]+)\}/g, (_, p) => extractByPath(payloadObj, p));
+    const tpl = body || String(row.template || '');
+    if (tpl) {
+      body = tpl.replace(/\$\{([^}]+)\}/g, (_, p) => extractByPath(payloadObj, p));
     } else {
       body = JSON.stringify(payloadObj);
     }

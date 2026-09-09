@@ -122,17 +122,24 @@ class KeysActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- 编辑弹窗：名称 / 模式 / 启停 ----------
+    // ---------- 编辑弹窗：名称 / 模式 / 模板 / 启停 ----------
     private fun openEdit(k: KeyItem) {
         val view = layoutInflater.inflate(R.layout.dialog_edit_key, null)
         val etName = view.findViewById<EditText>(R.id.etName)
         val rbDefault = view.findViewById<RadioButton>(R.id.rbModeDefault)
         val rbCustom = view.findViewById<RadioButton>(R.id.rbModeCustom)
         val cbActive = view.findViewById<CheckBox>(R.id.cbActive)
+        val tplFields = view.findViewById<View>(R.id.tplFields)
+        val etTemplate = view.findViewById<EditText>(R.id.etTemplate)
 
         etName.setText(k.name)
         if (k.mode == "custom") rbCustom.isChecked = true else rbDefault.isChecked = true
         cbActive.isChecked = k.active == 1
+        etTemplate.setText(k.template ?: "")
+        val syncTpl = { tplFields.visibility = if (rbCustom.isChecked) View.VISIBLE else View.GONE }
+        syncTpl()
+        rbDefault.setOnClickListener { syncTpl() }
+        rbCustom.setOnClickListener { syncTpl() }
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("编辑 Key")
@@ -155,7 +162,8 @@ class KeysActivity : AppCompatActivity() {
                             UpdateKeyReq(
                                 name = name,
                                 active = cbActive.isChecked,
-                                mode = if (rbCustom.isChecked) "custom" else "default"
+                                mode = if (rbCustom.isChecked) "custom" else "default",
+                                template = if (rbCustom.isChecked) etTemplate.text.toString().trim() else ""
                             )
                         )
                     }

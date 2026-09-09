@@ -21,7 +21,8 @@ data class CreateKeyReq(val name: String = "default")
 data class UpdateKeyReq(
     val name: String? = null,
     val active: Boolean? = null,
-    val mode: String? = null
+    val mode: String? = null,
+    val template: String? = null
 )
 data class KeyResp(val id: Long, val key: String, val name: String, val createdAt: Long)
 data class KeyItem(

@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
-import { API_BASE } from './config.js?v=20260909b';
-import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js?v=20260909b';
+import { API_BASE } from './config.js?v=20260909c';
+import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js?v=20260909c';
 
 const $ = (sel) => document.querySelector(sel);
 const root = $('#app');
@@ -194,7 +194,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
       <h2><span class="doc-num">3</span>自定义模式 · 模板解析</h2>
       <p class="hint">在「Key 管理 → ⋯ → 编辑」中把 key 切为「自定义（模板解析）」后，message 不再原样发送，而是作为<b>模板</b>：<code>$&#123;字段&#125;</code> 占位符会用 JSON 数据里的对应字段填充。适合监控、CI 等推送结构化 JSON 的场景。</p>
       <div class="doc-code"><code>${escapeHtml(samples[5])}</code><button class="btn mini doc-copy">复制</button></div>
-      <p class="hint">路径语法：点分路径、数组用下标（<code>$&#123;event.alerts.0.name&#125;</code>），取不到的字段替换为空串。<b>未传 message 时</b>，整个 JSON 会直接作为通知内容触达，调用方无需任何改造。</p>
+      <p class="hint">路径语法：点分路径、数组用下标（<code>$&#123;event.alerts.0.name&#125;</code>），取不到的字段替换为空串。也可以在「编辑 Key → 自定义模式」的<b>消息模板</b>输入框里给 key 配一个固定模板，调用方不传 message 时自动用它渲染；两者都没有时，整个 JSON 会直接作为通知内容触达，调用方无需任何改造。</p>
     </div>
 
     <div class="card doc-card">
@@ -374,7 +374,11 @@ function openKeyEdit(k) {
           <label class="seg-item"><input type="radio" name="mode" value="default" ${k.mode !== 'custom' ? 'checked' : ''}/><span>默认</span></label>
           <label class="seg-item"><input type="radio" name="mode" value="custom" ${k.mode === 'custom' ? 'checked' : ''}/><span>自定义（模板解析）</span></label>
         </div>
-        <p class="hint">默认：message 原样作为通知内容。自定义：message 作为模板，<code>$&#123;字段&#125;</code> 占位符用 JSON 数据填充（如 $&#123;name&#125;、$&#123;event.msg&#125;，点分路径、数组用下标）；未传 message 时整个 JSON 直接作为内容。</p>
+        <p class="hint">默认：message 原样作为通知内容。自定义：message 作为模板，<code>$&#123;字段&#125;</code> 占位符用 JSON 数据填充（如 $&#123;name&#125;、$&#123;event.msg&#125;，点分路径、数组用下标）；未传 message 时用下面的 key 模板，两者都没有时整个 JSON 直接作为内容。</p>
+        <div id="tpl-fields" ${k.mode === 'custom' ? '' : 'hidden'}>
+          <label>消息模板（可选，调用方未传 message 时生效）</label>
+          <input name="template" value="${escapeHtml(k.template || '')}" placeholder="如：$&#123;name&#125; 的年龄是 $&#123;age&#125; 岁" />
+        </div>
         <label class="check-row"><input type="checkbox" name="active" ${k.active ? 'checked' : ''}/> 启用此 key（停用后 webhook 调用将被拒绝，不推送消息）</label>
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="edit-cancel">取消</button>
@@ -385,6 +389,8 @@ function openKeyEdit(k) {
     </div>
   </div>`;
   const form = $('#edit-form');
+  const syncTpl = () => { $('#tpl-fields').hidden = form.mode.value !== 'custom'; };
+  form.querySelectorAll('input[name=mode]').forEach((r) => { r.onchange = syncTpl; });
   $('#edit-cancel').onclick = () => { root_.innerHTML = ''; };
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -394,6 +400,7 @@ function openKeyEdit(k) {
         name: form.name.value.trim(),
         active: form.active.checked,
         mode: form.mode.value,
+        template: form.mode.value === 'custom' ? form.template.value : '',
       });
       root_.innerHTML = '';
       loadList();

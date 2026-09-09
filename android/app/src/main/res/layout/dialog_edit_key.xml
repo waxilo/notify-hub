@@ -55,12 +55,35 @@
 
         <TextView
             android:id="@+id/tvModeHint"
-            android:text="默认：message 原样作为通知内容。\n自定义：message 作为模板，${字段} 占位符用 JSON 数据填充（如 ${name}、${event.msg}）；未传 message 时整个 JSON 直接作为内容。"
+            android:text="默认：message 原样作为通知内容。\n自定义：message 作为模板，${字段} 占位符用 JSON 数据填充（如 ${name}、${event.msg}）；未传 message 时用下方 key 模板，两者都没有时整个 JSON 直接作为内容。"
             android:textSize="12sp"
             android:textColor="@color/text_muted"
             android:layout_marginTop="6dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
+
+        <LinearLayout
+            android:id="@+id/tplFields"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <TextView
+                android:text="消息模板（可选，调用方未传 message 时生效）"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_secondary"
+                android:layout_marginTop="10dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+            <EditText
+                android:id="@+id/etTemplate"
+                android:hint="如：${name} 的年龄是 ${age} 岁"
+                android:inputType="textMultiLine"
+                android:maxLines="3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
 
         <TextView
             android:text="通知标题固定为 key 名称，不会被请求参数覆盖"
