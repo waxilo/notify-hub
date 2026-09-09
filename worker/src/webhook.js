@@ -1,20 +1,12 @@
 // 通用 webhook：GET/POST 均可，按 key 路由到对应用户并写入通知
 //   GET  /hook/:key?title=...&body=...&message=...[&dedup_key=...]
 //   POST /hook/:key  (JSON | form | 纯文本；防重 key 可用头 X-Dedup-Key 或字段 dedup_key)
-// 防重：未传 key 时按「用户|key|标题|内容」自动生成哈希；同一防重 key 在 5 分钟窗口内
-// 只入库/推送一次，重复调用直接返回首条消息 id（deduplicated: true）
+// 防重：仅在调用方显式传入 dedup_key 时生效（用于调用方超时重试场景），
+// 同一 dedup_key 在 5 分钟窗口内只入库/推送一次，重复调用直接返回首条消息 id（deduplicated: true）。
+// 默认调用方消息不重复，不做内容哈希自动防重。
 import { json, readJson, readText } from './utils.js';
 
 const DEDUP_WINDOW_MS = 300_000;
-
-async function autoDedupKey(userId, keyId, title, body) {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(`${userId}|${keyId}|${title}|${body}`)
-  );
-  return 'auto-' + [...new Uint8Array(digest)].slice(0, 8)
-    .map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 // 按点分路径从 JSON 提取值，支持数组下标与 $ 前缀：$.event.alerts.0.title（$ 表示 JSON 本身，可省略）
 function extractByPath(obj, path) {
@@ -99,15 +91,16 @@ export async function handleWebhook(request, env, key) {
   if (title.length > 500) title = title.slice(0, 500);
   if (body.length > 8000) body = body.slice(0, 8000);
   if (dedupKey.length > 128) dedupKey = dedupKey.slice(0, 128);
-  if (!dedupKey) dedupKey = await autoDedupKey(row.user_id, row.id, title, body);
 
   await env.DB.prepare('UPDATE keys SET last_used=? WHERE id=?').bind(Date.now(), row.id).run();
 
-  // 防重：窗口内同一防重 key 已存在则不重复入库/推送
-  const dup = await env.DB.prepare(
-    'SELECT id FROM notifications WHERE user_id=? AND dedup_key=? AND created_at>? ORDER BY id DESC LIMIT 1'
-  ).bind(row.user_id, dedupKey, Date.now() - DEDUP_WINDOW_MS).first();
-  if (dup) return json({ ok: true, deduplicated: true, id: dup.id });
+  // 防重：仅当调用方显式传了 dedup_key 时，窗口内同一 key 已存在则不重复入库/推送
+  if (dedupKey) {
+    const dup = await env.DB.prepare(
+      'SELECT id FROM notifications WHERE user_id=? AND dedup_key=? AND created_at>? ORDER BY id DESC LIMIT 1'
+    ).bind(row.user_id, dedupKey, Date.now() - DEDUP_WINDOW_MS).first();
+    if (dup) return json({ ok: true, deduplicated: true, id: dup.id });
+  }
 
   const res = await env.DB.prepare(
     'INSERT INTO notifications (user_id, key_id, dedup_key, title, body, payload, created_at, read) VALUES (?,?,?,?,?,?,?,0)'

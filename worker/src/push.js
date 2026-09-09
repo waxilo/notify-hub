@@ -2,12 +2,12 @@
 // - 每个 userId 一个 DO 实例（idFromName(userId)）
 // - 客户端经 Worker 鉴权后转发 /connect 升级为 WebSocket
 // - webhook 收到新消息后 Worker 调 /notify，DO 广播给该用户所有在线连接
-// - 触达重推：广播后 1 秒内未收到 /delivered 回调则重推，最多 MAX_ATTEMPTS 次；
+// - 触达重推：广播后 0.3 秒内未收到 /delivered 回调则重推，最多 MAX_ATTEMPTS 次；
 //   重推任务持久化在 ctx.storage，DO 休眠也会由 alarm 按时唤醒
 // 使用 Hibernation API：连接空闲时不计费、DO 可休眠，消息到达自动唤醒
 
 const MAX_ATTEMPTS = 5;      // 首推 + 重推 4 次，共 5 次
-const RETRY_DELAY_MS = 1000; // 每次未收到触达回调后的重推间隔
+const RETRY_DELAY_MS = 300;  // 每次未收到触达回调后的重推间隔（0.3 秒）
 
 export class PushHub {
   constructor(ctx, env) {
@@ -42,7 +42,7 @@ export class PushHub {
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
 
-    // Worker 内部调用：广播新通知并登记待触达任务（1 秒后 alarm 检查回调）
+    // Worker 内部调用：广播新通知并登记待触达任务（0.3 秒后 alarm 检查回调）
     if (url.pathname === '/notify' && request.method === 'POST') {
       const msg = await request.text();
       const delivered = await this.broadcast(msg);
@@ -71,7 +71,7 @@ export class PushHub {
     return new Response('not found', { status: 404 });
   }
 
-  // 重推：1 秒一次，直到收到触达回调（D1 delivered_at 已写）或超过次数上限
+  // 重推：0.3 秒一次，直到收到触达回调（D1 delivered_at 已写）或超过次数上限
   async alarm() {
     const pending = await this.ctx.storage.list({ prefix: 'p:' });
     if (!pending.size) {
