@@ -49,21 +49,36 @@ jobs:
 
       # 发布到 tag latest 的 Release（覆盖旧版），下载链接固定指向
       # https://github.com/waxilo/notify-hub/releases/latest/download/app-debug.apk
+      # 策略：优先复用已有 release（仅替换资产与元数据），避免 delete+create 竞态产生草稿
       - name: "Publish APK to Release (latest tag)"
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          gh release delete latest --yes --cleanup-tag || true
-          for i in 1 2 3; do
-            sleep 3
-            gh release create latest \
-              android/app/build/outputs/apk/debug/app-debug.apk \
-              --title "Android APK v1.0.${{ github.run_number }}" \
-              --notes "CI 自动构建的调试版 APK（run ${{ github.run_number }}），可直接下载安装。
+          ASSET="android/app/build/outputs/apk/debug/app-debug.apk"
+          REL_NAME="Android APK v1.0.${{ github.run_number }}"
+          NOTES="CI 自动构建的 APK（run ${{ github.run_number }}），可直接下载安装。
           VERSION_CODE=${{ github.run_number }}
-          VERSION_NAME=1.0.${{ github.run_number }}" && break
-            gh release delete latest --yes --cleanup-tag || true
-          done
-          # 兜底：若 create 竞态产生草稿 Release，强制发布为正式版
-          gh release edit latest --draft=false || true
+          VERSION_NAME=1.0.${{ github.run_number }}"
+          if gh release view latest --repo "$REPO" >/dev/null 2>&1; then
+            REL_ID=$(gh api "repos/$REPO/releases/tags/latest" --jq '.id')
+            # 删除旧资产
+            for AID in $(gh api "repos/$REPO/releases/$REL_ID/assets" --jq '.[].id'); do
+              gh api -X DELETE "repos/$REPO/releases/assets/$AID"
+            done
+            # 更新元数据并强制非草稿（草稿无法按 tag 名操作，必须用 id）
+            gh api -X PATCH "repos/$REPO/releases/$REL_ID" \
+              -f name="$REL_NAME" -f body="$NOTES" -F draft=false
+            # 上传新 APK（需要显式 Content-Type）
+            gh api -X POST "repos/$REPO/releases/$REL_ID/assets?name=app-debug.apk" \
+              -H "Content-Type: application/vnd.android.package-archive" \
+              --input "$ASSET"
+          else
+            gh release create latest "$ASSET" \
+              --repo "$REPO" \
+              --title "$REL_NAME" \
+              --notes "$NOTES"
+          fi
+          # 终验：非草稿才算成功
+          gh api "repos/$REPO/releases/tags/latest" --jq '{draft, name, assets: [.assets[].name]}'
