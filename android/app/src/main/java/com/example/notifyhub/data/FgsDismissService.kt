@@ -1,7 +1,7 @@
 package com.example.notifyhub.data
 
-import android.app.NotificationListenerService
 import android.os.Build
+import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
 // 隐藏前台服务的常驻通知：
