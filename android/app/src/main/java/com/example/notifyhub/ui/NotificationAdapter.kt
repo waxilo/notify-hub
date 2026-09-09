@@ -35,10 +35,10 @@ class NotificationAdapter(private val onClick: (NotificationItem) -> Unit) :
     override fun getItemCount(): Int = items.size
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val it = items[position]
-        holder.title.text = it.title ?: "(无标题)"
-        holder.body.text = it.body ?: ""
-        holder.time.text = if (it.createdAt > 0) fmt.format(Date(it.createdAt)) else ""
-        holder.itemView.setOnClickListener { onClick(it) }
+        val item = items[position]
+        holder.title.text = item.title ?: "(无标题)"
+        holder.body.text = item.body ?: ""
+        holder.time.text = if (item.createdAt > 0) fmt.format(Date(item.createdAt)) else ""
+        holder.itemView.setOnClickListener { onClick(item) }
     }
 }
