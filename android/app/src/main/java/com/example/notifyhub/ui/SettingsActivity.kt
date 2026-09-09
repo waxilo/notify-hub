@@ -106,7 +106,7 @@ class SettingsActivity : AppCompatActivity() {
             val i = android.content.Intent(this, com.example.notifyhub.data.PushService::class.java)
                 .setAction(com.example.notifyhub.data.FgsDismissService.ACTION_REPOST_FG)
             try {
-                android.content.ContextCompat.startForegroundService(this, i)
+                startForegroundService(i)
                 Toast.makeText(this, "已触发隐藏", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(this, "触发失败：${e.message}", Toast.LENGTH_SHORT).show()
