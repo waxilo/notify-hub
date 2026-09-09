@@ -194,8 +194,8 @@ class PushService : Service() {
 
     companion object {
         private const val PUSH_CHANNEL_ID = "notify_hub_push"
-        private const val FG_CHANNEL_ID = "notify_hub_foreground"
-        private const val FOREGROUND_ID = 1001
+        const val FG_CHANNEL_ID = "notify_hub_foreground"
+        const val FOREGROUND_ID = 1001  // 供 FgsDismissService 定向隐藏
         private const val DEDUP_WINDOW_MS = 3000L  // 防重缓存窗口：3 秒内同 key 只弹一次
     }
 }

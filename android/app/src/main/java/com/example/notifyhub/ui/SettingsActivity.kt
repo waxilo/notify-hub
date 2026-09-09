@@ -78,6 +78,34 @@ class SettingsActivity : AppCompatActivity() {
         super.onResume()
         // "安装未知应用"授权后返回：自动继续安装
         com.example.notifyhub.data.UpdateChecker.resumePendingInstall(this)
+        updateFgsState()
+    }
+
+    // 常驻通知隐藏状态（依赖"通知使用权"）
+    private fun updateFgsState() {
+        val tv = findViewById<TextView>(R.id.tvFgsState)
+        val btn = findViewById<Button>(R.id.btnFgs)
+        if (isListenerEnabled()) {
+            tv.text = "✅ 常驻通知已隐藏（通知使用权已开启）"
+            btn.text = "关闭隐藏（跳转通知使用权设置）"
+        } else {
+            tv.text = "常驻通知显示中，开启通知使用权可自动隐藏"
+            btn.text = "开启通知使用权（隐藏常驻通知）"
+        }
+        btn.setOnClickListener {
+            startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            )
+        }
+    }
+
+    private fun isListenerEnabled(): Boolean {
+        val raw = android.provider.Settings.Secure.getString(
+            contentResolver, "enabled_notification_listeners"
+        ) ?: return false
+        return raw.split(":").any {
+            android.content.ComponentName.unflattenFromString(it)?.packageName == packageName
+        }
     }
 
     private suspend fun checkUpdate(tvUpdate: TextView) {
