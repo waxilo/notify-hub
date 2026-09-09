@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
-import { API_BASE } from './config.js';
-import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js';
+import { API_BASE } from './config.js?v=20260909b';
+import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js?v=20260909b';
 
 const $ = (sel) => document.querySelector(sel);
 const root = $('#app');
