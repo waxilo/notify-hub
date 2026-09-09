@@ -37,7 +37,7 @@ function extractByPath(obj, path) {
 }
 
 export async function handleWebhook(request, env, key) {
-  const row = await env.DB.prepare('SELECT id, user_id, active, mode, title_path, body_path FROM keys WHERE key=?').bind(key).first();
+  const row = await env.DB.prepare('SELECT id, name, user_id, active, mode, title_path, body_path FROM keys WHERE key=?').bind(key).first();
   if (!row) return json({ error: 'invalid key' }, 404);
   // 禁用状态的 key 不接收、不入库、不推送
   if (!row.active) return json({ error: 'key is disabled' }, 403);
@@ -115,6 +115,7 @@ export async function handleWebhook(request, env, key) {
       type: 'notification',
       id: res.meta.last_row_id,
       dedup_key: dedupKey,
+      key_name: row.name || '',
       title,
       body,
       created_at: Date.now(),

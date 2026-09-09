@@ -12,6 +12,7 @@
     <color name="text_muted">#8A93A6</color>
     <color name="ok">#17994F</color>
     <color name="ok_bg">#E5F6EC</color>
+    <color name="ok_text">#1F7A3D</color>
     <color name="warn">#C07F00</color>
     <color name="warn_bg">#FBF3DF</color>
     <color name="danger">#E5484D</color>

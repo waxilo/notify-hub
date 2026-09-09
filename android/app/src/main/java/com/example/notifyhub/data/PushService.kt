@@ -44,11 +44,6 @@ class PushService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 手动"立即隐藏常驻通知"：重贴一次前台通知，触发监听器 onNotificationPosted 立即取消
-        if (intent?.action == FgsDismissService.ACTION_REPOST_FG) {
-            startForeground(FOREGROUND_ID, buildForegroundNotification())
-            return START_STICKY
-        }
         // 重新登录后再次 startService：重置鉴权失败标记并在未连接时重新 connect
         if (authFailed) {
             authFailed = false
@@ -100,9 +95,19 @@ class PushService : Service() {
                         recentKeys.entries.removeAll { now - it.value > DEDUP_WINDOW_MS }
                         val dedupKey = obj.optString("dedup_key").ifEmpty { "id:${obj.optLong("id")}" }
                         if (recentKeys.put(dedupKey, now) != null) return
+                        // 通知标题显示 key 名称（消息来源），消息标题与内容作为正文
+                        val keyName = obj.optString("key_name")
+                        val msgTitle = obj.optString("title")
+                        val msgBody = obj.optString("body")
+                        val body = when {
+                            keyName.isEmpty() -> if (msgBody.isEmpty()) msgTitle else "$msgTitle\n$msgBody"
+                            msgBody.isEmpty() -> msgTitle
+                            msgTitle.isEmpty() -> msgBody
+                            else -> "$msgTitle\n$msgBody"
+                        }
                         showNotification(
-                            obj.optString("title").ifEmpty { "新通知" },
-                            obj.optString("body"),
+                            keyName.ifEmpty { msgTitle.ifEmpty { "新通知" } },
+                            body,
                             obj.optLong("id", 0L)
                         )
                     }
@@ -200,7 +205,7 @@ class PushService : Service() {
     companion object {
         private const val PUSH_CHANNEL_ID = "notify_hub_push"
         const val FG_CHANNEL_ID = "notify_hub_foreground"
-        const val FOREGROUND_ID = 1001  // 供 FgsDismissService 定向隐藏
+        const val FOREGROUND_ID = 1001
         private const val DEDUP_WINDOW_MS = 3000L  // 防重缓存窗口：3 秒内同 key 只弹一次
     }
 }

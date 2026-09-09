@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@color/bg">
 
     <LinearLayout
         android:orientation="vertical"
@@ -10,38 +11,16 @@
         android:layout_height="wrap_content">
 
         <TextView
-            android:text="Worker 地址"
-            android:textStyle="bold"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <EditText
-            android:id="@+id/etApi"
-            android:hint="https://notify-hub-worker.sloan.dpdns.org"
-            android:inputType="textUri"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <Button
-            android:id="@+id/btnSaveCfg"
-            android:text="保存配置"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#dddddd"
-            android:layout_marginVertical="16dp" />
-
-        <TextView
             android:text="发送测试通知"
             android:textStyle="bold"
+            android:textColor="@color/text_main"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
         <TextView
             android:text="选择一个 key，通过真实 webhook 发送测试消息，验证链路与 App 收件。"
             android:textSize="13sp"
-            android:textColor="#7b8794"
+            android:textColor="@color/text_muted"
+            android:layout_marginTop="4dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
         <Button
@@ -51,61 +30,28 @@
             android:layout_height="wrap_content" />
         <TextView
             android:id="@+id/tvTestMsg"
-            android:textColor="#1f7a3d"
+            android:textColor="@color/ok_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="#dddddd"
-            android:layout_marginVertical="16dp" />
-
-        <TextView
-            android:text="常驻通知"
-            android:textStyle="bold"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <TextView
-            android:id="@+id/tvFgsState"
-            android:textSize="13sp"
-            android:textColor="#7b8794"
-            android:layout_marginTop="4dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <Button
-            android:id="@+id/btnFgs"
-            android:text="开启通知使用权（隐藏常驻通知）"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-        <Button
-            android:id="@+id/btnFgsHideNow"
-            android:text="立即隐藏常驻通知"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-        <TextView
-            android:text="授予「通知使用权」后，App 会自动隐藏通知栏里的常驻运行通知，实时推送不受影响。个别系统若重新显示，App 会再次自动隐藏。"
-            android:textSize="12sp"
-            android:textColor="#7b8794"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#dddddd"
+            android:background="@color/border"
             android:layout_marginVertical="16dp" />
 
         <TextView
             android:text="版本与更新"
             android:textStyle="bold"
+            android:textColor="@color/text_main"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
         <TextView
             android:id="@+id/tvVersion"
             android:text="当前版本：检查中…"
             android:textSize="13sp"
-            android:textColor="#7b8794"
+            android:textColor="@color/text_muted"
+            android:layout_marginTop="4dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
         <Button
@@ -115,25 +61,27 @@
             android:layout_height="wrap_content" />
         <TextView
             android:id="@+id/tvUpdateMsg"
-            android:textColor="#1f7a3d"
+            android:textColor="@color/ok_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="#dddddd"
+            android:background="@color/border"
             android:layout_marginVertical="16dp" />
 
         <TextView
             android:text="修改密码"
             android:textStyle="bold"
+            android:textColor="@color/text_main"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
         <EditText
             android:id="@+id/etOld"
             android:hint="原密码"
             android:inputType="textPassword"
+            android:layout_marginTop="6dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
         <EditText
@@ -150,7 +98,7 @@
 
         <TextView
             android:id="@+id/tvMsg"
-            android:textColor="#c0392b"
+            android:textColor="@color/danger"
             android:layout_marginTop="8dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />

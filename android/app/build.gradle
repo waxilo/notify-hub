@@ -19,9 +19,24 @@ android {
         versionName appVersionName
     }
 
+    // 固定签名：CI 每次构建用同一 keystore，覆盖安装不会报"软件包冲突"（签名不一致）
+    signingConfigs {
+        app {
+            storeFile file("notifyhub-release.p12")
+            storePassword "notifyhub2026"
+            keyAlias "notifyhub"
+            keyPassword "notifyhub2026"
+            storeType "PKCS12"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.app
+        }
         release {
             minifyEnabled false
+            signingConfig signingConfigs.app
         }
     }
 

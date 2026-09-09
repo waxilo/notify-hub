@@ -26,14 +26,7 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
-        val cfg = ConfigStore(this)
-        val etApi = findViewById<EditText>(R.id.etApi)
-        etApi.setText(cfg.apiBase)
-
-        findViewById<Button>(R.id.btnSaveCfg).setOnClickListener {
-            cfg.apiBase = etApi.text.toString().trim()
-            Toast.makeText(this, "配置已保存", Toast.LENGTH_SHORT).show()
-        }
+        // Worker 地址已写死在 ConfigStore，不再提供设置项
 
         findViewById<Button>(R.id.btnTestNotify).setOnClickListener {
             lifecycleScope.launch { pickKeyAndTest() }
@@ -78,49 +71,6 @@ class SettingsActivity : AppCompatActivity() {
         super.onResume()
         // "安装未知应用"授权后返回：自动继续安装
         com.example.notifyhub.data.UpdateChecker.resumePendingInstall(this)
-        updateFgsState()
-    }
-
-    // 常驻通知隐藏状态（依赖"通知使用权"）
-    private fun updateFgsState() {
-        val tv = findViewById<TextView>(R.id.tvFgsState)
-        val btn = findViewById<Button>(R.id.btnFgs)
-        if (isListenerEnabled()) {
-            tv.text = "✅ 常驻通知已隐藏（通知使用权已开启）"
-            btn.text = "关闭隐藏（跳转通知使用权设置）"
-        } else {
-            tv.text = "常驻通知显示中，开启通知使用权可自动隐藏"
-            btn.text = "开启通知使用权（隐藏常驻通知）"
-        }
-        btn.setOnClickListener {
-            startActivity(
-                android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-            )
-        }
-        // 手动兜底：让前台服务重贴一次通知，监听器收到 onNotificationPosted 后立即取消
-        findViewById<Button>(R.id.btnFgsHideNow).setOnClickListener {
-            if (!isListenerEnabled()) {
-                Toast.makeText(this, "请先开启通知使用权", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val i = android.content.Intent(this, com.example.notifyhub.data.PushService::class.java)
-                .setAction(com.example.notifyhub.data.FgsDismissService.ACTION_REPOST_FG)
-            try {
-                startForegroundService(i)
-                Toast.makeText(this, "已触发隐藏", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(this, "触发失败：${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun isListenerEnabled(): Boolean {
-        val raw = android.provider.Settings.Secure.getString(
-            contentResolver, "enabled_notification_listeners"
-        ) ?: return false
-        return raw.split(":").any {
-            android.content.ComponentName.unflattenFromString(it)?.packageName == packageName
-        }
     }
 
     private suspend fun checkUpdate(tvUpdate: TextView) {
