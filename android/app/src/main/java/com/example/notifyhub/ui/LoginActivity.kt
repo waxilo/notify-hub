@@ -6,6 +6,8 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.notifyhub.R
@@ -16,12 +18,21 @@ import com.example.notifyhub.data.TokenStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class LoginActivity : AppCompatActivity() {
 
     private val loading by lazy { LoadingOverlay(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+
+        // 上次有崩溃日志：跳过自动登录跳转，先展示崩溃详情（无 adb 环境定位闪退）
+        val crashFile = File(getExternalFilesDir(null) ?: filesDir, "crash/last.txt")
+        if (crashFile.exists()) {
+            setContentView(R.layout.activity_login)
+            showLastCrash(crashFile)
+            return
+        }
 
         // 已有登录态（JWT 无过期时间，服务端不吊销即长期有效）：直接进入主界面
         if (!TokenStore(this).token.isNullOrBlank()) {
@@ -71,6 +82,31 @@ class LoginActivity : AppCompatActivity() {
             } finally {
                 loading.hide()
             }
+        }
+    }
+
+    // 展示上次崩溃堆栈；「关闭」时清除日志
+    private fun showLastCrash(f: File) {
+        try {
+            val text = try { f.readText() } catch (_: Exception) { "" }
+            val tv = TextView(this)
+            tv.text = text.take(4000).ifEmpty { "（日志为空）" }
+            tv.textSize = 12f
+            tv.setPadding(48, 24, 48, 24)
+            tv.setTextIsSelectable(true)
+            val scroll = android.widget.ScrollView(this)
+            scroll.addView(tv)
+            AlertDialog.Builder(this)
+                .setTitle("检测到上次崩溃日志")
+                .setView(scroll)
+                .setPositiveButton("复制") { _, _ ->
+                    val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("crash", text))
+                    Toast.makeText(this, "已复制，可粘贴反馈", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("关闭") { _, _ -> f.delete() }
+                .show()
+        } catch (_: Throwable) {
         }
     }
 }
