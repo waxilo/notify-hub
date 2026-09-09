@@ -1,0 +1,12 @@
+name = "notify-hub-worker"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+# D1 数据库绑定（database_id 在 `wrangler d1 create notify-hub` 后填）
+[[d1_databases]]
+binding = "DB"
+database_name = "notify-hub"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+# JWT_SECRET 属于密钥，请用命令设置，不要写在这里：
+#   wrangler secret put JWT_SECRET
