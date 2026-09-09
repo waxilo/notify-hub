@@ -34,8 +34,11 @@ data class NotificationItem(
     val title: String?,
     val body: String?,
     val payload: String?,
+    val keyId: Long?,
+    val keyName: String?,
     val createdAt: Long,
-    val read: Int
+    val read: Int,
+    val deliveredAt: Long?
 )
 data class NotifResp(val notifications: List<NotificationItem>, val total: Int)
 
@@ -47,8 +50,12 @@ interface NotifyApi {
     @POST("/api/keys") suspend fun createKey(@Body req: CreateKeyReq): KeyResp
     @GET("/api/keys") suspend fun listKeys(): KeysResp
     @DELETE("/api/keys/{id}") suspend fun revokeKey(@Path("id") id: Long): Response<Unit>
-    @GET("/api/notifications") suspend fun listNotifications(@Query("limit") limit: Int = 50): NotifResp
+    @GET("/api/notifications") suspend fun listNotifications(
+        @Query("limit") limit: Int = 50,
+        @Query("key_id") keyId: Long? = null
+    ): NotifResp
     @POST("/api/notifications/{id}/read") suspend fun markRead(@Path("id") id: Long): Response<Unit>
+    @POST("/api/notifications/{id}/delivered") suspend fun markDelivered(@Path("id") id: Long): Response<Unit>
 }
 
 // 自动附加 Bearer token

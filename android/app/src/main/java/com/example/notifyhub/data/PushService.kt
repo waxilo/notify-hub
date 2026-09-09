@@ -10,7 +10,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import com.example.notifyhub.api.Api
 import com.example.notifyhub.ui.NotificationsActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -174,6 +178,12 @@ class PushService : Service() {
             .setAutoCancel(true)
             .build()
         nm.notify((id % Int.MAX_VALUE).toInt().coerceAtLeast(1), n)
+        // 已触达回调：通知成功弹出到系统通知栏后，上报 Worker 修正该消息的触达状态
+        if (id > 0) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try { Api.instance(this@PushService).markDelivered(id) } catch (_: Exception) {}
+            }
+        }
     }
 
     companion object {

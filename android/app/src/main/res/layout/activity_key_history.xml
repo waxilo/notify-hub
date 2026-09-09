@@ -11,7 +11,7 @@
         android:layout_height="wrap_content">
 
         <TextView
-            android:text="通知收件箱"
+            android:text="发送历史"
             android:textSize="18sp"
             android:textStyle="bold"
             android:layout_weight="1"
@@ -26,17 +26,29 @@
             android:layout_height="wrap_content" />
 
         <Button
-            android:id="@+id/btnHistory"
-            android:text="历史"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-
-        <Button
-            android:id="@+id/btnSettings"
-            android:text="设置"
+            android:id="@+id/btnBack"
+            android:text="返回"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
     </LinearLayout>
+
+    <TextView
+        android:text="按 Key 过滤："
+        android:textSize="13sp"
+        android:layout_marginTop="8dp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content" />
+
+    <Spinner
+        android:id="@+id/spKey"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <TextView
+        android:id="@+id/tvMsg"
+        android:textColor="#7b8794"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv"

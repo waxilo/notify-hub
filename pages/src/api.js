@@ -29,4 +29,5 @@ export const api = {
   createKey: (name) => req('/keys', 'POST', { name }),
   listKeys: () => req('/keys'),
   revokeKey: (id) => req(`/keys/${id}`, 'DELETE'),
+  listNotifications: (keyId) => req(`/notifications${keyId ? `?key_id=${keyId}` : ''}`),
 };

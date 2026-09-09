@@ -137,12 +137,19 @@ async function loadList() {
           <td>
             ${k.active ? `<button data-test="${k.id}">测试</button>` : ''}
             ${k.active ? `<button data-revoke="${k.id}">吊销</button>` : ''}
+            <button data-history="${k.id}">历史</button>
           </td>
         </tr>`).join('')}</tbody>
     </table>
     <p class="msg" id="test-msg"></p>`;
     box.querySelectorAll('[data-revoke]').forEach((b) => {
       b.onclick = async () => { await api.revokeKey(b.dataset.revoke); loadList(); };
+    });
+    box.querySelectorAll('[data-history]').forEach((b) => {
+      b.onclick = () => {
+        const k = keys.find((x) => String(x.id) === b.dataset.history);
+        if (k) renderKeyHistory(k);
+      };
     });
     box.querySelectorAll('[data-test]').forEach((b) => {
       b.onclick = async () => {
@@ -170,6 +177,45 @@ async function loadList() {
       };
     });
   } catch (err) { box.innerHTML = `<p class="msg">${err.message}</p>`; }
+}
+
+// 按 key 查看发送历史，含触发/触达状态
+async function renderKeyHistory(k) {
+  const old = $('#key-history');
+  if (old) old.remove();
+  const view = $('#view-keys');
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.id = 'key-history';
+  card.innerHTML = `
+    <h2>「${escapeHtml(k.name)}」发送历史</h2>
+    <p><button id="hist-back">返回 Key 列表</button>
+    <span style="color:#7b8794">状态说明：<b style="color:#1f7a3d">已触达</b> = App 已弹出系统通知；<b style="color:#b8860b">未触达</b> = App 离线尚未接收</span></p>
+    <div id="hist-body"><p>加载中…</p></div>`;
+  view.appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth' });
+  $('#hist-back').onclick = () => card.remove();
+  const body = $('#hist-body');
+  try {
+    const { notifications, total } = await api.listNotifications(k.id);
+    if (!notifications.length) { body.innerHTML = '<p>该 key 还没有发送记录。</p>'; return; }
+    body.innerHTML = `
+      <p style="color:#7b8794">共 ${total} 条，显示最近 ${notifications.length} 条</p>
+      <table>
+        <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th></tr></thead>
+        <tbody>${notifications.map((n) => `
+          <tr>
+            <td>${escapeHtml(n.title)}</td>
+            <td>${escapeHtml((n.body || '').slice(0, 80))}</td>
+            <td>${new Date(n.created_at).toLocaleString()}</td>
+            <td>${n.delivered_at
+              ? `<b style="color:#1f7a3d">已触达</b><br/><span style="color:#7b8794;font-size:12px">${new Date(n.delivered_at).toLocaleString()}</span>`
+              : '<b style="color:#b8860b">未触达</b>'}</td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+  } catch (err) {
+    body.innerHTML = `<p class="msg">加载失败：${err.message}</p>`;
+  }
 }
 
 function renderAccount() {

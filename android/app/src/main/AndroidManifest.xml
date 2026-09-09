@@ -28,6 +28,10 @@
             android:name=".ui.SettingsActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".ui.KeyHistoryActivity"
+            android:exported="false" />
+
         <service
             android:name=".data.PushService"
             android:exported="false"

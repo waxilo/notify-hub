@@ -2,7 +2,7 @@
 import { json } from './utils.js';
 import { register, login, changePassword, verifyJWT } from './auth.js';
 import { createKey, listKeys, revokeKey } from './keys.js';
-import { listNotifications, getNotification, markRead, deleteNotification } from './notifications.js';
+import { listNotifications, getNotification, markRead, markDelivered, deleteNotification } from './notifications.js';
 import { handleWebhook } from './webhook.js';
 import { PushHub } from './push.js';
 import { appLatest, appDownload } from './appupdate.js';
@@ -89,11 +89,16 @@ export default {
         return revokeKey(request, env, uid, p.split('/')[2]);
       }
 
-      // 通知（供安卓端轮询）
+      // 通知（支持 ?key_id= 按 key 过滤，供发送历史查询）
       if (p === '/notifications' && request.method === 'GET') {
         const uid = await getUserId(request, env);
         const e = requireAuth(uid); if (e) return e;
         return listNotifications(request, env, uid);
+      }
+      if (p.startsWith('/notifications/') && p.endsWith('/delivered') && request.method === 'POST') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return markDelivered(request, env, uid, p.split('/')[2]);
       }
       if (p.startsWith('/notifications/') && p.endsWith('/read') && request.method === 'POST') {
         const uid = await getUserId(request, env);
