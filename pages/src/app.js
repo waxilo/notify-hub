@@ -175,7 +175,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
       <table class="doc-params">
         <thead><tr><th>参数</th><th>说明</th></tr></thead>
         <tbody>
-          <tr><td><code>message</code></td><td>通知内容（最长 8000 字符）。旧参数 <code>body</code> / <code>text</code> 仍兼容，按此顺序取第一个非空值</td></tr>
+          <tr><td><code>message</code></td><td>通知内容（最长 8000 字符）</td></tr>
           <tr><td><code>dedup_key</code></td><td>可选。显式防重 key：5 分钟窗口内相同 key 只推送一次（用于调用方超时重试场景）。不传则服务端自动生成唯一 key，消息不做内容去重</td></tr>
         </tbody>
       </table>
@@ -188,8 +188,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
       <p class="hint">监控、CI 等第三方系统推送的 JSON 往往字段固定且不是 title / body。给 key 开启「自定义模式」并配置提取路径后，可以把这类 payload <b>原样转发</b>，由服务端提取标题和内容——无需改造调用方。</p>
       <p class="hint">路径语法：点分路径，数组用下标；<code>$</code> 表示 JSON 本身（可省略前缀），<code>$</code> 单独使用时表示整个 JSON 字符串。示例：</p>
       <div class="doc-code"><code>${escapeHtml(samples[5])}</code><button class="btn mini doc-copy">复制</button></div>
-      <p class="hint">提取结果为空时自动回退：标题回退 key 名称，内容回退 message 参数，所以两种 payload 可以混用同一个 key。在「Key 管理 → 编辑」中切换模式并填写 title_path / body_path。</p>
-    </div>
+      <p class="hint">提取结果为空时自动回退：标题回退 key 名称，内容回退 message 参数，所以两种 payload 可以混用同一个 key。在「Key 管理 → 编辑」中切换模式并填写 title_path / body_path。</p>    </div>
 
     <div class="card doc-card">
       <h2><span class="doc-num">4</span>响应与防重</h2>

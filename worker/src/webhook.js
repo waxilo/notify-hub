@@ -1,8 +1,7 @@
 // 通用 webhook：GET/POST 均可，按 key 路由到对应用户并写入通知
 //   GET  /hook/:key?message=...[&dedup_key=...]
 //   POST /hook/:key  (JSON | form | 纯文本；防重 key 可用头 X-Dedup-Key 或字段 dedup_key)
-// 标题固定为 key 名称（key_name），调用方不需要传 title；通知内容统一取 message
-// （兼容旧参数 body / text 作为回退）。自定义模式仍可用 title_path 覆盖标题。
+// 标题固定为 key 名称（key_name），调用方不需要传 title；通知内容统一取 message。
 // 防重：仅在调用方显式传入 dedup_key 时做去重（用于调用方超时重试场景），
 // 同一 dedup_key 在 5 分钟窗口内只入库/推送一次，重复调用直接返回首条消息 id（deduplicated: true）。
 // 每条消息未传 dedup_key 时由服务端生成唯一 key（srv-<uuid>），随 WS 推送下发，供 App 对重推消息判重。
@@ -41,7 +40,7 @@ export async function handleWebhook(request, env, key) {
   // 禁用状态的 key 不接收、不入库、不推送
   if (!row.active) return json({ error: 'key is disabled' }, 403);
 
-  // 标题固定为 key 名称；内容统一取 message（兼容旧参数 body / text）
+  // 标题固定为 key 名称；内容统一取 message
   let title = row.name || '通知';
   let body = '';
   let payload = null;
@@ -54,12 +53,12 @@ export async function handleWebhook(request, env, key) {
       if (ct.includes('application/json')) {
         const data = await request.json();
         customData = data;
-        body = String(data.message ?? data.body ?? data.text ?? '');
+        body = String(data.message ?? '');
         dedupKey = dedupKey || String(data.dedup_key ?? '');
         payload = JSON.stringify(data);
       } else if (ct.includes('application/x-www-form-urlencoded') || ct.includes('multipart/form-data')) {
         const form = await request.formData();
-        body = String(form.get('message') ?? form.get('body') ?? form.get('text') ?? '');
+        body = String(form.get('message') ?? '');
         dedupKey = dedupKey || String(form.get('dedup_key') ?? '');
         const obj = {};
         for (const [k, v] of form.entries()) obj[k] = v;
@@ -74,14 +73,14 @@ export async function handleWebhook(request, env, key) {
     }
   } else {
     const url = new URL(request.url);
-    body = url.searchParams.get('message') || url.searchParams.get('body') || url.searchParams.get('text') || '';
+    body = url.searchParams.get('message') || '';
     dedupKey = dedupKey || url.searchParams.get('dedup_key') || '';
     const obj = {};
     for (const [k, v] of url.searchParams.entries()) obj[k] = v;
     payload = JSON.stringify(obj);
   }
 
-  // 自定义模式：按 key 配置的 JSON 路径从请求体提取标题/内容（标题提取为空时回退 key 名称，内容回退 message/body/text）
+  // 自定义模式：按 key 配置的 JSON 路径从请求体提取标题/内容（标题提取为空时回退 key 名称，内容回退 message）
   if (row.mode === 'custom' && customData && typeof customData === 'object') {
     title = extractByPath(customData, row.title_path) || title;
     body = extractByPath(customData, row.body_path) || body;
