@@ -97,6 +97,21 @@ class SettingsActivity : AppCompatActivity() {
                 android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
             )
         }
+        // 手动兜底：让前台服务重贴一次通知，监听器收到 onNotificationPosted 后立即取消
+        findViewById<Button>(R.id.btnFgsHideNow).setOnClickListener {
+            if (!isListenerEnabled()) {
+                Toast.makeText(this, "请先开启通知使用权", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val i = android.content.Intent(this, com.example.notifyhub.data.PushService::class.java)
+                .setAction(com.example.notifyhub.data.FgsDismissService.ACTION_REPOST_FG)
+            try {
+                android.content.ContextCompat.startForegroundService(this, i)
+                Toast.makeText(this, "已触发隐藏", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "触发失败：${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun isListenerEnabled(): Boolean {

@@ -44,6 +44,11 @@ class PushService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 手动"立即隐藏常驻通知"：重贴一次前台通知，触发监听器 onNotificationPosted 立即取消
+        if (intent?.action == FgsDismissService.ACTION_REPOST_FG) {
+            startForeground(FOREGROUND_ID, buildForegroundNotification())
+            return START_STICKY
+        }
         // 重新登录后再次 startService：重置鉴权失败标记并在未连接时重新 connect
         if (authFailed) {
             authFailed = false
