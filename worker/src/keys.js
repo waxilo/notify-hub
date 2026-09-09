@@ -20,7 +20,7 @@ export async function createKey(request, env, userId) {
 
 export async function listKeys(request, env, userId) {
   const rows = await env.DB.prepare(
-    'SELECT id, name, key, created_at, last_used, active, mode, title_path, body_path FROM keys WHERE user_id = ? ORDER BY id DESC'
+    'SELECT id, name, key, created_at, last_used, active, mode, body_path FROM keys WHERE user_id = ? ORDER BY id DESC'
   ).bind(userId).all();
   // key 明文返回（自托管场景无需隐藏），Web 端可随时查看/复制
   const keys = (rows.results || []).map((r) => ({ ...r, keyFull: r.key }));
@@ -40,9 +40,6 @@ export async function updateKey(request, env, userId, id) {
   }
   if (body.mode !== undefined) {
     sets.push('mode=?'); vals.push(String(body.mode) === 'custom' ? 'custom' : 'default');
-  }
-  if (body.title_path !== undefined) {
-    sets.push('title_path=?'); vals.push(body.title_path ? String(body.title_path).slice(0, 200) : null);
   }
   if (body.body_path !== undefined) {
     sets.push('body_path=?'); vals.push(body.body_path ? String(body.body_path).slice(0, 200) : null);

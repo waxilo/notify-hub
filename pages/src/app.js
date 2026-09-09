@@ -146,12 +146,11 @@ requests.post('${API_BASE}/hook/<KEY>', json={
     `// 第三方系统原样 POST 的 payload（不需要改造它）：
 {
   "event": {
-    "name": "CPU 告警",
-    "alerts": [{ "title": "node-1 高负载", "message": "CPU 92%" }]
+    "alerts": [{ "message": "node-1 CPU 92%" }]
   }
 }
-// key 配置：title_path = $.event.alerts.0.title，body_path = $.event.alerts.0.message
-// 手机收到的通知：标题「node-1 高负载」，内容「CPU 92%」`,
+// key 配置：body_path = $.event.alerts.0.message
+// 手机收到的通知：标题 = key 名称，内容「node-1 CPU 92%」`,
     // 6: 响应
     `{ "ok": true, "id": 71 }                      // 正常入库并推送
 { "ok": true, "deduplicated": true, "id": 70 } // 显式 dedup_key 重复，未重复推送
@@ -184,16 +183,16 @@ requests.post('${API_BASE}/hook/<KEY>', json={
           <tr><td><code>dedup_key</code></td><td>可选。显式防重 key：5 分钟窗口内相同 key 只推送一次（用于调用方超时重试场景）。不传则服务端自动生成唯一 key，消息不做内容去重</td></tr>
         </tbody>
       </table>
-      <p class="hint"><b>不需要传 title</b>：通知标题固定为 key 的名称。自定义模式下仍可通过 title_path 从 payload 提取标题覆盖。</p>
+      <p class="hint"><b>不需要传 title</b>：通知标题固定为 key 的名称，任何模式下都不会被请求参数覆盖。</p>
       <p class="hint">表单模式下参数相同；防重 key 也可放在请求头 <code>X-Dedup-Key</code> 中。GET 与 POST 语义一致，仅 GET 用查询串传参。</p>
     </div>
 
     <div class="card doc-card">
       <h2><span class="doc-num">3</span>自定义模式 · 接入第三方系统</h2>
-      <p class="hint">监控、CI 等第三方系统推送的 JSON 往往字段固定且不是 title / body。给 key 开启「自定义模式」并配置提取路径后，可以把这类 payload <b>原样转发</b>，由服务端提取标题和内容——无需改造调用方。</p>
+      <p class="hint">监控、CI 等第三方系统推送的 JSON 往往字段固定且不是 message。给 key 开启「自定义模式」并配置内容提取路径后，可以把这类 payload <b>原样转发</b>，由服务端提取通知内容——无需改造调用方。</p>
       <p class="hint">路径语法：点分路径，数组用下标；<code>$</code> 表示 JSON 本身（可省略前缀），<code>$</code> 单独使用时表示整个 JSON 字符串。示例：</p>
       <div class="doc-code"><code>${escapeHtml(samples[5])}</code><button class="btn mini doc-copy">复制</button></div>
-      <p class="hint">提取结果为空时自动回退：标题回退 key 名称，内容回退 message 参数，所以两种 payload 可以混用同一个 key。在「Key 管理 → 编辑」中切换模式并填写 title_path / body_path。</p>    </div>
+      <p class="hint">提取结果为空时自动回退 message 参数，所以两种 payload 可以混用同一个 key。在「Key 管理 → ⋯ → 编辑」中切换模式并填写 body_path。</p>    </div>
 
     <div class="card doc-card">
       <h2><span class="doc-num">4</span>响应与防重</h2>
@@ -283,63 +282,78 @@ async function loadList() {
           <span class="badge ${k.active ? 'on' : 'off'}">${k.active ? '启用中' : '已停用'}</span>
           <span class="badge mode">${k.mode === 'custom' ? '自定义' : '默认'}</span>
           <code class="key-url">${escapeHtml(k.keyFull || k.key)}</code>
+          <button class="key-more" data-more="${k.id}" aria-label="操作菜单">⋯</button>
         </div>
         <div class="key-sub">
           <span class="hint">最近使用：${k.last_used ? new Date(k.last_used).toLocaleString() : '从未使用'}</span>
-          ${k.mode === 'custom' ? `<span class="hint">title← ${escapeHtml(k.title_path || '(未配置)')}　body← ${escapeHtml(k.body_path || '(未配置)')}</span>` : ''}
-        </div>
-        <div class="key-actions" aria-label="操作">
-          <button class="btn mini" data-copyurl="${k.id}">复制 Hook 地址</button>
-          <button class="btn mini" data-test="${k.id}" ${k.active ? '' : 'disabled'}>测试</button>
-          <button class="btn mini" data-history="${k.id}">历史</button>
-          <button class="btn mini" data-edit="${k.id}">编辑</button>
-          ${k.active ? `<button class="btn mini danger" data-revoke="${k.id}">停用</button>` : `<button class="btn mini" data-enable="${k.id}">启用</button>`}
+          ${k.mode === 'custom' ? `<span class="hint">内容← ${escapeHtml(k.body_path || '(未配置)')}</span>` : ''}
         </div>
       </div>`).join('')}</div>
     <p class="msg" id="test-msg"></p>`;
 
     const find = (id) => keys.find((x) => String(x.id) === id);
-    box.querySelectorAll('[data-copyurl]').forEach((b) => {
-      b.onclick = () => { const k = find(b.dataset.copyurl); if (k) copyText(`${API_BASE}/hook/${k.keyFull || k.key}`, b); };
-    });
-    box.querySelectorAll('[data-revoke]').forEach((b) => {
-      b.onclick = async () => { await api.revokeKey(b.dataset.revoke); loadList(); };
-    });
-    box.querySelectorAll('[data-enable]').forEach((b) => {
-      b.onclick = async () => { await api.updateKey(b.dataset.enable, { active: true }); loadList(); };
-    });
-    box.querySelectorAll('[data-history]').forEach((b) => {
-      b.onclick = () => { const k = find(b.dataset.history); if (k) openKeyHistory(k); };
-    });
-    box.querySelectorAll('[data-edit]').forEach((b) => {
-      b.onclick = () => { const k = find(b.dataset.edit); if (k) openKeyEdit(k); };
-    });
-      box.querySelectorAll('[data-test]').forEach((b) => {
-      b.onclick = async () => {
-        const k = find(b.dataset.test);
+
+    // 「⋯」操作菜单：点击展开、点其他区域/再点一次收起（无 hover 时序问题，触屏同样可用）
+    const closeMenus = () => {
+      box.querySelectorAll('.key-menu').forEach((m) => m.remove());
+      box.querySelectorAll('.key-more.active').forEach((b) => b.classList.remove('active'));
+    };
+    if (!renderDocs._menuBound) {
+      document.addEventListener('click', () => {
+        document.querySelectorAll('.key-menu').forEach((m) => m.remove());
+        document.querySelectorAll('.key-more.active').forEach((b) => b.classList.remove('active'));
+      });
+      renderDocs._menuBound = true;
+    }
+    box.querySelectorAll('[data-more]').forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const k = find(b.dataset.more);
         if (!k) return;
-        const msg = $('#test-msg');
-        msg.textContent = '';
-        b.disabled = true; b.textContent = '发送中…';
-        loadingPush();
-        try {
-          const res = await fetch(`${API_BASE}/hook/${encodeURIComponent(k.keyFull)}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: '来自 Web 控制台的测试' }),
-          });
-          const data = await res.json().catch(() => ({}));
-          msg.textContent = res.ok
-            ? `✅ 测试已送达「${k.name}」（通知 id: ${data.id}），App 在线将实时弹出通知`
-            : `❌ 发送失败（HTTP ${res.status}）：${data.error || '未知错误'}`;
-        } catch (err) {
-          msg.textContent = `❌ 网络错误：${err.message}`;
-        } finally {
-          loadingPop();
-          b.disabled = false; b.textContent = '测试';
-        }
+        const wasOpen = b.classList.contains('active');
+        closeMenus();
+        if (wasOpen) return;
+        b.classList.add('active');
+        const menu = document.createElement('div');
+        menu.className = 'key-menu';
+        const items = [
+          ['复制 Hook 地址', () => copyText(`${API_BASE}/hook/${k.keyFull || k.key}`, b)],
+          ...(k.active ? [['测试', () => testKey(k)]] : []),
+          ['历史', () => openKeyHistory(k)],
+          ['编辑', () => openKeyEdit(k)],
+          k.active
+            ? ['停用', async () => { await api.revokeKey(k.id); loadList(); }]
+            : ['启用', async () => { await api.updateKey(k.id, { active: true }); loadList(); }],
+        ];
+        menu.innerHTML = items.map(([label], i) => `<button class="btn mini${label === '停用' ? ' danger' : ''}" data-i="${i}">${label}</button>`).join('');
+        menu.querySelectorAll('[data-i]').forEach((btn) => {
+          btn.onclick = (ev) => { ev.stopPropagation(); closeMenus(); items[Number(btn.dataset.i)][1](); };
+        });
+        b.closest('.key-row').appendChild(menu);
       };
     });
+
+    // 测试发送（菜单项调用）
+    async function testKey(k) {
+      const msg = $('#test-msg');
+      msg.textContent = '';
+      loadingPush();
+      try {
+        const res = await fetch(`${API_BASE}/hook/${encodeURIComponent(k.keyFull)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: '来自 Web 控制台的测试' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        msg.textContent = res.ok
+          ? `✅ 测试已送达「${k.name}」（通知 id: ${data.id}），App 在线将实时弹出通知`
+          : `❌ 发送失败（HTTP ${res.status}）：${data.error || '未知错误'}`;
+      } catch (err) {
+        msg.textContent = `❌ 网络错误：${err.message}`;
+      } finally {
+        loadingPop();
+      }
+    }
   } catch (err) { box.innerHTML = `<p class="msg">${err.message}</p>`; }
 }
 
@@ -359,11 +373,9 @@ function openKeyEdit(k) {
           <label class="seg-item"><input type="radio" name="mode" value="custom" ${k.mode === 'custom' ? 'checked' : ''}/><span>自定义（JSON 路径提取）</span></label>
         </div>
         <div id="custom-fields" ${k.mode === 'custom' ? '' : 'hidden'}>
-          <label>标题提取路径（title_path）</label>
-          <input name="title_path" value="${escapeHtml(k.title_path || '')}" placeholder="如：$.event.alerts.0.title" />
           <label>内容提取路径（body_path）</label>
           <input name="body_path" value="${escapeHtml(k.body_path || '')}" placeholder="如：$.event.message" />
-          <p class="hint">点分路径，数组用下标（$.a.b.0.c），$ 表示 JSON 本身可省略。提取为空时回退默认字段 title / body / message。</p>
+          <p class="hint">标题固定为 key 名称，不参与提取。内容路径为点分路径，数组用下标（$.a.b.0.c），$ 表示 JSON 本身可省略；提取为空时回退 message。</p>
         </div>
         <label class="check-row"><input type="checkbox" name="active" ${k.active ? 'checked' : ''}/> 启用此 key（停用后 webhook 调用将被拒绝，不推送消息）</label>
         <div class="modal-actions">
@@ -386,7 +398,6 @@ function openKeyEdit(k) {
         name: form.name.value.trim(),
         active: form.active.checked,
         mode: form.mode.value,
-        title_path: form.title_path.value.trim(),
         body_path: form.body_path.value.trim(),
       });
       root_.innerHTML = '';

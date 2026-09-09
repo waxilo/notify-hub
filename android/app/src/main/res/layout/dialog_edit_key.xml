@@ -40,7 +40,7 @@
             android:layout_height="wrap_content">
             <RadioButton
                 android:id="@+id/rbModeDefault"
-                android:text="默认（title/body）"
+                android:text="默认（message）"
                 android:textSize="14sp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
@@ -54,21 +54,7 @@
         </RadioGroup>
 
         <TextView
-            android:id="@+id/lblTitlePath"
-            android:text="标题提取路径 title_path（如 $.event.alerts.0.title）"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_secondary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <EditText
-            android:id="@+id/etTitlePath"
-            android:hint="留空回退默认字段"
-            android:inputType="text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
+            android:id="@+id/lblBodyPath"
             android:text="内容提取路径 body_path（如 $.event.message）"
             android:textSize="12sp"
             android:textStyle="bold"
@@ -78,9 +64,17 @@
             android:layout_height="wrap_content" />
         <EditText
             android:id="@+id/etBodyPath"
-            android:hint="留空回退默认字段"
+            android:hint="留空回退 message"
             android:inputType="text"
             android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:text="通知标题固定为 key 名称，不参与提取"
+            android:textSize="12sp"
+            android:textColor="@color/text_muted"
+            android:layout_marginTop="6dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
         <CheckBox

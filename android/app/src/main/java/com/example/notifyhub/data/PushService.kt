@@ -95,19 +95,14 @@ class PushService : Service() {
                         recentKeys.entries.removeAll { now - it.value > DEDUP_WINDOW_MS }
                         val dedupKey = obj.optString("dedup_key").ifEmpty { "id:${obj.optLong("id")}" }
                         if (recentKeys.put(dedupKey, now) != null) return
-                        // 通知标题显示 key 名称（消息来源），消息标题与内容作为正文
+                        // 通知标题 = key 名称；正文 = 消息内容。
+                        // 服务端标题已固定为 key 名（与 key_name 一致），不再拼进正文，避免出现两个相同标题
                         val keyName = obj.optString("key_name")
                         val msgTitle = obj.optString("title")
                         val msgBody = obj.optString("body")
-                        val body = when {
-                            keyName.isEmpty() -> if (msgBody.isEmpty()) msgTitle else "$msgTitle\n$msgBody"
-                            msgBody.isEmpty() -> msgTitle
-                            msgTitle.isEmpty() -> msgBody
-                            else -> "$msgTitle\n$msgBody"
-                        }
                         showNotification(
                             keyName.ifEmpty { msgTitle.ifEmpty { "新通知" } },
-                            body,
+                            msgBody,
                             obj.optLong("id", 0L)
                         )
                     }

@@ -126,7 +126,6 @@ class KeysActivity : AppCompatActivity() {
     private fun openEdit(k: KeyItem) {
         val view = layoutInflater.inflate(R.layout.dialog_edit_key, null)
         val etName = view.findViewById<EditText>(R.id.etName)
-        val etTitlePath = view.findViewById<EditText>(R.id.etTitlePath)
         val etBodyPath = view.findViewById<EditText>(R.id.etBodyPath)
         val rbDefault = view.findViewById<RadioButton>(R.id.rbModeDefault)
         val rbCustom = view.findViewById<RadioButton>(R.id.rbModeCustom)
@@ -134,7 +133,6 @@ class KeysActivity : AppCompatActivity() {
 
         etName.setText(k.name)
         if (k.mode == "custom") rbCustom.isChecked = true else rbDefault.isChecked = true
-        etTitlePath.setText(k.titlePath ?: "")
         etBodyPath.setText(k.bodyPath ?: "")
         cbActive.isChecked = k.active == 1
 
@@ -161,7 +159,6 @@ class KeysActivity : AppCompatActivity() {
                                 name = name,
                                 active = cbActive.isChecked,
                                 mode = mode,
-                                titlePath = etTitlePath.text.toString().trim(),
                                 bodyPath = etBodyPath.text.toString().trim()
                             )
                         )
@@ -210,7 +207,7 @@ class KeysActivity : AppCompatActivity() {
             h.tvMode.text = if (k.mode == "custom") "自定义" else "默认"
             val used = k.lastUsed?.let { "最近使用 ${fmt.format(Date(it))}" } ?: "从未使用"
             h.tvMeta.text = "…${(k.keyFull ?: k.key).takeLast(6)} · $used" +
-                if (k.mode == "custom") "\ntitle← ${k.titlePath ?: "未配置"}  body← ${k.bodyPath ?: "未配置"}" else ""
+                if (k.mode == "custom") "\n内容← ${k.bodyPath ?: "未配置"}" else ""
             h.itemView.alpha = if (on) 1f else 0.62f
             h.btnTest.isEnabled = on
             h.btnTest.setOnClickListener { sendTest(k, h.btnTest) }

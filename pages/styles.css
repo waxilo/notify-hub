@@ -97,7 +97,7 @@ input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px
 }
 .tabs button.active { background: #fff; color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
 
-/* ---- Key 列表（横向条目 + 悬浮操作条） ---- */
+/* ---- Key 列表（横向条目 + 点击「⋯」弹出操作菜单） ---- */
 .key-list { display: flex; flex-direction: column; gap: 8px; }
 .key-row {
   position: relative;
@@ -111,33 +111,27 @@ input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px
 .key-name { font-weight: 650; font-size: 15px; }
 .key-url { margin-left: auto; font-size: 12px; }
 .key-sub { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
-.key-actions {
-  position: absolute; left: 10px; right: 10px; top: 100%; z-index: 30;
-  display: flex; gap: 6px; flex-wrap: wrap;
-  margin-top: 6px; padding: 8px 10px;
+/* 行尾「⋯」按钮：点击展开操作菜单（不再用 hover，避免延迟收起的时序问题） */
+.key-more {
+  flex: none; width: 32px; height: 32px; border-radius: 10px;
+  border: none; background: transparent; color: var(--muted);
+  font-size: 18px; line-height: 1; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.key-more:hover, .key-more.active { background: var(--primary-soft); color: var(--primary); }
+.key-menu {
+  position: absolute; right: 10px; top: calc(100% - 4px); z-index: 40;
+  min-width: 156px; padding: 6px;
   background: #fff; border: 1px solid var(--border); border-radius: 12px;
-  box-shadow: 0 10px 28px rgba(28, 36, 51, .14);
-  opacity: 0; transform: translateY(-8px) scale(.99); pointer-events: none;
-  /* 收起时延迟 0.45s 再动画，给用户移动鼠标到操作条的时间 */
-  transition: opacity .22s ease .45s, transform .22s cubic-bezier(.2, .8, .3, 1) .45s;
+  box-shadow: 0 10px 28px rgba(28, 36, 51, .16);
+  display: flex; flex-direction: column; gap: 2px;
+  animation: menuIn .16s cubic-bezier(.2, .8, .3, 1);
 }
-/* 隐形桥：填补条目与操作条之间的 6px 空隙，鼠标划过时保持展开 */
-.key-actions::before {
-  content: ''; position: absolute; left: 0; right: 0; top: -8px; height: 8px;
-}
-.key-row:hover .key-actions,
-.key-row:focus-within .key-actions,
-.key-actions:hover {
-  opacity: 1; transform: translateY(0) scale(1); pointer-events: auto;
-  /* 展开无延迟，跟手 */
-  transition: opacity .18s ease, transform .18s cubic-bezier(.2, .8, .3, 1);
-}
-@media (hover: none) {
-  .key-actions {
-    position: static; opacity: 1; transform: none; pointer-events: auto;
-    box-shadow: none; background: transparent; border: none; padding: 8px 0 0; margin-top: 6px;
-  }
-}
+@keyframes menuIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+.key-menu .btn { text-align: left; border: none; background: transparent; box-shadow: none; padding: 8px 12px; }
+.key-menu .btn:hover { background: #f2f5fb; }
+.key-menu .btn.danger { color: var(--danger); }
+.key-menu .btn.danger:hover { background: #fdf0ef; }
 
 /* ---- 徽章 ---- */
 .badge {

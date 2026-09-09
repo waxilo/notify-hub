@@ -22,7 +22,6 @@ data class UpdateKeyReq(
     val name: String? = null,
     val active: Boolean? = null,
     val mode: String? = null,
-    @SerializedName("title_path") val titlePath: String? = null,
     @SerializedName("body_path") val bodyPath: String? = null
 )
 data class KeyResp(val id: Long, val key: String, val name: String, val createdAt: Long)
@@ -35,7 +34,6 @@ data class KeyItem(
     @SerializedName("last_used") val lastUsed: Long?,
     val active: Int,
     val mode: String?,
-    @SerializedName("title_path") val titlePath: String?,
     @SerializedName("body_path") val bodyPath: String?
 )
 data class KeysResp(val keys: List<KeyItem>)

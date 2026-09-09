@@ -35,7 +35,7 @@ function extractByPath(obj, path) {
 }
 
 export async function handleWebhook(request, env, key) {
-  const row = await env.DB.prepare('SELECT id, name, user_id, active, mode, title_path, body_path FROM keys WHERE key=?').bind(key).first();
+  const row = await env.DB.prepare('SELECT id, name, user_id, active, mode, body_path FROM keys WHERE key=?').bind(key).first();
   if (!row) return json({ error: 'invalid key' }, 404);
   // 禁用状态的 key 不接收、不入库、不推送
   if (!row.active) return json({ error: 'key is disabled' }, 403);
@@ -80,9 +80,9 @@ export async function handleWebhook(request, env, key) {
     payload = JSON.stringify(obj);
   }
 
-  // 自定义模式：按 key 配置的 JSON 路径从请求体提取标题/内容（标题提取为空时回退 key 名称，内容回退 message）
+  // 自定义模式：按 key 配置的 JSON 路径从请求体提取内容（提取为空时回退 message）；
+  // 标题不参与提取，固定为 key 名称
   if (row.mode === 'custom' && customData && typeof customData === 'object') {
-    title = extractByPath(customData, row.title_path) || title;
     body = extractByPath(customData, row.body_path) || body;
   }
 
