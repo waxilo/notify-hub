@@ -33,7 +33,8 @@ data class KeyItem(
     val createdAt: Long?,
     @SerializedName("last_used") val lastUsed: Long?,
     val active: Int,
-    val mode: String?
+    val mode: String?,
+    val template: String?
 )
 data class KeysResp(val keys: List<KeyItem>)
 data class NotificationItem(
