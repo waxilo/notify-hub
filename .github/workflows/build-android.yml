@@ -56,7 +56,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          ASSET="android/app/build/outputs/apk/debug/app-debug.apk"
+          ASSET=$(ls android/app/build/outputs/apk/debug/*.apk | head -1)
+          APK_NAME=$(basename "$ASSET")
+          echo "APK: $APK_NAME"
           REL_NAME="Android APK v1.0.${{ github.run_number }}"
           NOTES="CI 自动构建的 APK（run ${{ github.run_number }}），可直接下载安装。
           VERSION_CODE=${{ github.run_number }}
@@ -75,7 +77,7 @@ jobs:
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "Content-Type: application/vnd.android.package-archive" \
               --data-binary @"$ASSET" \
-              "https://uploads.github.com/repos/$REPO/releases/$REL_ID/assets?name=app-debug.apk" \
+              "https://uploads.github.com/repos/$REPO/releases/$REL_ID/assets?name=$APK_NAME" \
               > /dev/null
           else
             gh release create latest "$ASSET" \

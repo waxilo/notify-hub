@@ -40,6 +40,13 @@ android {
         }
     }
 
+    // 输出文件名带版本：notify-hub-v1.0.<code>-<code>.apk，便于区分不同构建产物
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            output.outputFileName = "notify-hub-v${variant.versionName}-c${variant.versionCode}.apk"
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
