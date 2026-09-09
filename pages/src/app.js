@@ -4,6 +4,8 @@ import { api, getToken, setToken, isLoggedIn } from './api.js';
 
 const $ = (sel) => document.querySelector(sel);
 const root = $('#app');
+// APK 固定下载链接（GitHub Release latest，无需登录/token）
+const APK_URL = 'https://github.com/waxilo/notify-hub/releases/latest/download/app-debug.apk';
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -23,6 +25,9 @@ function authView() {
       <button type="submit" class="primary" id="auth-submit">登录</button>
       <p class="msg" id="auth-msg"></p>
     </form>
+    <div class="dl-noauth">
+      <a class="button primary" href="${APK_URL}">下载安卓 App（无需登录）</a>
+    </div>
   </div>`;
   let mode = 'login';
   $('#tab-login').onclick = () => { mode = 'login'; $('#tab-login').classList.add('active'); $('#tab-reg').classList.remove('active'); $('#auth-submit').textContent = '登录'; };
@@ -74,7 +79,6 @@ function switchTab(tabId, viewId) {
 
 function renderAppDownload() {
   const view = $('#view-app');
-  const APK_URL = 'https://github.com/waxilo/notify-hub/releases/latest/download/app-debug.apk';
   view.innerHTML = `
     <div class="card">
       <h2>下载安卓 App</h2>

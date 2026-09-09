@@ -5,6 +5,7 @@ import { createKey, listKeys, revokeKey } from './keys.js';
 import { listNotifications, getNotification, markRead, deleteNotification } from './notifications.js';
 import { handleWebhook } from './webhook.js';
 import { PushHub } from './push.js';
+import { appLatest, appDownload } from './appupdate.js';
 
 // Durable Object 类必须从主入口导出
 export { PushHub };
@@ -57,6 +58,10 @@ export default {
 
     if (pathname.startsWith('/api/')) {
       const p = pathname.replace('/api', '');
+
+      // App 版本检查与 APK 下载（公开接口，私有仓库经 GITHUB_TOKEN 代理）
+      if (p === '/app/latest' && request.method === 'GET') return appLatest(env);
+      if (p === '/app/download' && request.method === 'GET') return appDownload(env);
 
       // 账号
       if (p === '/register' && request.method === 'POST') return register(request, env);

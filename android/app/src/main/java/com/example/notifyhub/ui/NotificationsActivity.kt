@@ -17,6 +17,7 @@ import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.NotificationItem
 import com.example.notifyhub.data.ConfigStore
 import com.example.notifyhub.data.PushService
+import com.example.notifyhub.data.UpdateChecker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -47,6 +48,23 @@ class NotificationsActivity : AppCompatActivity() {
         ensureNotificationPermission()
         // 启动前台服务：WebSocket 长连接，收到推送立即弹系统通知（替代纯轮询）
         ContextCompat.startForegroundService(this, Intent(this, PushService::class.java))
+
+        // 静默检查更新，仅在有新版本时弹窗提示
+        lifecycleScope.launch {
+            val latest = UpdateChecker.latest(this@NotificationsActivity) ?: return@launch
+            if (UpdateChecker.isNewer(latest, this@NotificationsActivity)) {
+                withContext(Dispatchers.Main) {
+                    androidx.appcompat.app.AlertDialog.Builder(this@NotificationsActivity)
+                        .setTitle("发现新版本")
+                        .setMessage("最新版本：v${latest.versionName ?: "?"}（code ${latest.versionCode}），是否下载？")
+                        .setPositiveButton("下载") { _, _ ->
+                            UpdateChecker.openDownload(this@NotificationsActivity, latest)
+                        }
+                        .setNegativeButton("忽略", null)
+                        .show()
+                }
+            }
+        }
     }
 
     private fun ensureNotificationPermission() {

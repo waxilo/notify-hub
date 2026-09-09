@@ -7,12 +7,16 @@ android {
     namespace 'com.example.notifyhub'
     compileSdk 34
 
+    // CI 注入版本：-PappVersionCode=<run_number> -PappVersionName=1.0.<run_number>
+    def appVersionCode = (project.findProperty('appVersionCode') ?: '1') as Integer
+    def appVersionName = (project.findProperty('appVersionName') ?: '1.0') as String
+
     defaultConfig {
         applicationId "com.example.notifyhub"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersionName
     }
 
     buildTypes {
