@@ -1,11 +1,13 @@
 // Web 控制台逻辑（仅配置）
-import { API_BASE } from './config.js?v=20260909d';
-import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js?v=20260909d';
+import { API_BASE } from './config.js?v=20260910a';
+import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js?v=20260910a';
+
 
 const $ = (sel) => document.querySelector(sel);
 const root = $('#app');
-// APK 固定下载链接（GitHub Release latest，无需登录/token）
-const APK_URL = 'https://github.com/waxilo/notify-hub/releases/latest/download/app-debug.apk';
+// APK 下载走 Worker 代理：资产名带版本（notify-hub-v1.0.N-cN.apk），
+// 不能再按 GitHub 固定文件名直链；Worker 按 .apk 后缀动态查找，并回传正确的下载文件名
+const APK_URL = `${API_BASE}/api/app/download`;
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -109,11 +111,23 @@ function renderAppDownload() {
   view.innerHTML = `
     <div class="card">
       <h2>下载安卓 App</h2>
-      <p>最新版 APK 由 CI 自动构建并发布：</p>
-      <p><a class="btn primary" href="${APK_URL}">下载最新 APK（app-debug.apk）</a></p>
+      <p id="apk-meta" class="hint">正在获取最新版本…</p>
+      <p><a class="btn primary" id="apk-link" href="${APK_URL}">下载最新 APK</a></p>
       <p class="hint">手机浏览器打开本页点击下载；安装时如提示"未知来源"，允许即可。</p>
       <p class="hint">历史版本见 <a href="https://github.com/waxilo/notify-hub/releases" target="_blank" rel="noopener">GitHub Releases</a>。</p>
     </div>`;
+  // 拉取版本信息（接口公开，无需登录）；失败时不影响下载按钮
+  fetch(`${API_BASE}/api/app/latest`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      const meta = $('#apk-meta');
+      if (!meta || !d || !d.versionCode) { if (meta) meta.textContent = '版本信息暂不可用，可直接下载。'; return; }
+      const mb = d.apkSize ? `（${(d.apkSize / 1048576).toFixed(1)} MB）` : '';
+      meta.textContent = `最新版：v${d.versionName || d.versionCode}（code ${d.versionCode}）${mb}`;
+      const link = $('#apk-link');
+      if (link) link.textContent = `下载最新 APK v${d.versionName || d.versionCode}`;
+    })
+    .catch(() => { const meta = $('#apk-meta'); if (meta) meta.textContent = '版本信息暂不可用，可直接下载。'; });
 }
 
 /* ---------- 接入文档 ---------- */
