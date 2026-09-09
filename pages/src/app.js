@@ -111,7 +111,7 @@ async function renderKeys() {
     try {
       const k = await api.createKey(e.target.name.value.trim() || 'default');
       $('#new-key').innerHTML = `
-        <div class="alert">已生成（仅显示一次，请保存）：<br/>
+        <div class="alert">已生成（随时可在下方列表复制）：<br/>
         <code>${escapeHtml(k.key)}</code>
         <button onclick="navigator.clipboard.writeText('${escapeHtml(k.key)}')">复制</button><br/>
         Webhook 地址：<code>${API_BASE}/hook/${escapeHtml(k.key)}</code></div>`;
@@ -131,7 +131,9 @@ async function loadList() {
       <tbody>${keys.map((k) => `
         <tr>
           <td>${escapeHtml(k.name)}</td>
-          <td><code>${escapeHtml(k.key)}</code></td>
+          <td><code>${escapeHtml(k.key)}</code><br/>
+            <button data-copykey="${k.id}">复制 Key</button>
+            <button data-copyurl="${k.id}">复制地址</button></td>
           <td>${k.active ? '启用' : '已吊销'}</td>
           <td>${k.last_used ? new Date(k.last_used).toLocaleString() : '—'}</td>
           <td>
@@ -142,6 +144,19 @@ async function loadList() {
         </tr>`).join('')}</tbody>
     </table>
     <p class="msg" id="test-msg"></p>`;
+    const copy = (text) => navigator.clipboard.writeText(text);
+    box.querySelectorAll('[data-copykey]').forEach((b) => {
+      b.onclick = () => {
+        const k = keys.find((x) => String(x.id) === b.dataset.copykey);
+        if (k) copy(k.keyFull || k.key);
+      };
+    });
+    box.querySelectorAll('[data-copyurl]').forEach((b) => {
+      b.onclick = () => {
+        const k = keys.find((x) => String(x.id) === b.dataset.copyurl);
+        if (k) copy(`${API_BASE}/hook/${k.keyFull || k.key}`);
+      };
+    });
     box.querySelectorAll('[data-revoke]').forEach((b) => {
       b.onclick = async () => { await api.revokeKey(b.dataset.revoke); loadList(); };
     });

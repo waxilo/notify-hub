@@ -22,13 +22,9 @@ export async function listKeys(request, env, userId) {
   const rows = await env.DB.prepare(
     'SELECT id, name, key, created_at, last_used, active FROM keys WHERE user_id = ? ORDER BY id DESC'
   ).bind(userId).all();
-  // 列表里只展示前缀，完整 key 仅在创建时返回一次
-  const masked = (rows.results || []).map((r) => ({
-    ...r,
-    key: r.key.slice(0, 6) + '••••••••',
-    keyFull: r.key,
-  }));
-  return json({ keys: masked });
+  // key 明文返回（自托管场景无需隐藏），Web 端可随时查看/复制
+  const keys = (rows.results || []).map((r) => ({ ...r, keyFull: r.key }));
+  return json({ keys });
 }
 
 export async function revokeKey(request, env, userId, id) {
