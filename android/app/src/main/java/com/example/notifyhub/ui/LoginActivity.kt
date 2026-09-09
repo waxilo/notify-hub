@@ -26,6 +26,9 @@ class LoginActivity : AppCompatActivity() {
     private val loading by lazy { LoadingOverlay(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 必须最先调用 super：缺失会抛 SuperNotCalledException，导致 App 一启动即崩
+        // （v1.0.39 起「退出登录后闪退」的真正根因：退出登录清空任务栈后必须新建本页）
+        super.onCreate(savedInstanceState)
 
         LogHelper.append(this, "LoginActivity onCreate")
 
