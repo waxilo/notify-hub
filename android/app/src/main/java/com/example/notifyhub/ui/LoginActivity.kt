@@ -21,7 +21,7 @@ class LoginActivity : AppCompatActivity() {
 
         // 已有登录态（JWT 无过期时间，服务端不吊销即长期有效）：直接进入主界面
         if (!TokenStore(this).token.isNullOrBlank()) {
-            startActivity(Intent(this, NotificationsActivity::class.java))
+            startActivity(Intent(this, KeysActivity::class.java))
             finish()
             return
         }

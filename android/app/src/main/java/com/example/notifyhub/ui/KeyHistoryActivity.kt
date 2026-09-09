@@ -72,9 +72,14 @@ class KeyHistoryActivity : AppCompatActivity() {
                     android.R.layout.simple_spinner_dropdown_item,
                     listOf("全部 Key") + keys.map { it.name ?: "未命名" }
                 )
+                // 从 key 卡片进入时预选该 key
+                val pre = intent.getLongExtra("key_id", -1L)
+                val idx = keys.indexOfFirst { it.id == pre }
+                if (pre > 0 && idx >= 0) sp.setSelection(idx + 1) else sp.setSelection(0)
                 suppressSpinnerCb = false
-                loadHistory(null)
+                loadHistory(if (idx >= 0) pre else null)
             } catch (e: Exception) {
+                suppressSpinnerCb = false
                 toast("加载 key 列表失败：${e.message}")
             }
         }
@@ -87,10 +92,10 @@ class KeyHistoryActivity : AppCompatActivity() {
                 val resp = Api.safe { Api.instance(this@KeyHistoryActivity).listNotifications(100, keyId) }
                 rows.clear()
                 resp.notifications.forEach { n ->
-                    rows.add(
-                        if (n.deliveredAt != null) Row(n, "已触达", 0xFF1F7A3D.toInt())
-                        else Row(n, "未触达", 0xFFB8860B.toInt())
-                    )
+                rows.add(
+                    if (n.deliveredAt != null) Row(n, "已触达", 0xFF17994F.toInt(), R.drawable.bg_chip_on)
+                    else Row(n, "未触达", 0xFFC07F00.toInt(), R.drawable.bg_chip_off)
+                )
                 }
                 withContext(Dispatchers.Main) {
                     tvMsg.text = "共 ${resp.total} 条（显示最近 ${rows.size} 条）"

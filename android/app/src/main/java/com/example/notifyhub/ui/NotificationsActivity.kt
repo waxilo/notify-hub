@@ -41,8 +41,8 @@ class NotificationsActivity : AppCompatActivity() {
         rv.layoutManager = LinearLayoutManager(this)
         rv.adapter = adapter
 
-        findViewById<Button>(R.id.btnHistory).setOnClickListener {
-            startActivity(Intent(this, KeyHistoryActivity::class.java))
+        findViewById<Button>(R.id.btnKeys).setOnClickListener {
+            finish()  // 返回首页 Key 列表
         }
         findViewById<Button>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))

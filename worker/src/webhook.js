@@ -16,20 +16,44 @@ async function autoDedupKey(userId, keyId, title, body) {
     .map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// 按点分路径从 JSON 提取值，支持数组下标：event.alerts.0.title
+function extractByPath(obj, path) {
+  if (!path) return '';
+  let cur = obj;
+  for (const seg of String(path).split('.')) {
+    if (cur == null) return '';
+    if (Array.isArray(cur)) {
+      const i = parseInt(seg, 10);
+      if (Number.isNaN(i)) return '';
+      cur = cur[i];
+    } else if (typeof cur === 'object') {
+      cur = cur[seg];
+    } else {
+      return '';
+    }
+  }
+  if (cur == null) return '';
+  return typeof cur === 'object' ? JSON.stringify(cur) : String(cur);
+}
+
 export async function handleWebhook(request, env, key) {
-  const row = await env.DB.prepare('SELECT id, user_id, active FROM keys WHERE key=?').bind(key).first();
-  if (!row || !row.active) return json({ error: 'invalid or inactive key' }, 404);
+  const row = await env.DB.prepare('SELECT id, user_id, active, mode, title_path, body_path FROM keys WHERE key=?').bind(key).first();
+  if (!row) return json({ error: 'invalid key' }, 404);
+  // 禁用状态的 key 不接收、不入库、不推送
+  if (!row.active) return json({ error: 'key is disabled' }, 403);
 
   let title = '';
   let body = '';
   let payload = null;
   let dedupKey = request.headers.get('x-dedup-key') || '';
+  let customData = null;
 
   if (request.method === 'POST') {
     const ct = (request.headers.get('content-type') || '').toLowerCase();
     try {
       if (ct.includes('application/json')) {
         const data = await request.json();
+        customData = data;
         title = String(data.title ?? '');
         body = String(data.body ?? data.message ?? data.text ?? '');
         dedupKey = dedupKey || String(data.dedup_key ?? '');
@@ -58,6 +82,12 @@ export async function handleWebhook(request, env, key) {
     const obj = {};
     for (const [k, v] of url.searchParams.entries()) obj[k] = v;
     payload = JSON.stringify(obj);
+  }
+
+  // 自定义模式：按 key 配置的 JSON 路径从请求体提取标题/内容（提取为空时回退默认字段）
+  if (row.mode === 'custom' && customData && typeof customData === 'object') {
+    title = extractByPath(customData, row.title_path) || title;
+    body = extractByPath(customData, row.body_path) || body;
   }
 
   if (!title && !body) title = 'Webhook 通知';

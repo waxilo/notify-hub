@@ -1,19 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:orientation="vertical"
-    android:padding="12dp"
+    android:background="@color/bg"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
     <LinearLayout
         android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="10dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
         <TextView
             android:text="发送历史"
-            android:textSize="18sp"
+            android:textSize="20sp"
             android:textStyle="bold"
+            android:textColor="@color/text_main"
             android:layout_weight="1"
             android:gravity="center_vertical"
             android:layout_width="0dp"
@@ -22,31 +28,50 @@
         <Button
             android:id="@+id/btnRefresh"
             android:text="刷新"
+            android:textSize="13sp"
+            android:background="@drawable/bg_chip_mode"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
         <Button
             android:id="@+id/btnBack"
             android:text="返回"
+            android:textSize="13sp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_chip_mode"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
     </LinearLayout>
 
-    <TextView
-        android:text="按 Key 过滤："
-        android:textSize="13sp"
-        android:layout_marginTop="8dp"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content" />
-
-    <Spinner
-        android:id="@+id/spKey"
+    <LinearLayout
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:text="按 Key 过滤"
+            android:textSize="12sp"
+            android:textColor="@color/text_muted"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+
+        <Spinner
+            android:id="@+id/spKey"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/tvMsg"
-        android:textColor="#7b8794"
+        android:textSize="12sp"
+        android:textColor="@color/text_muted"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
@@ -55,5 +80,8 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
-        android:paddingTop="8dp" />
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="16dp" />
 </LinearLayout>

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="4dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:text="名称"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+        <EditText
+            android:id="@+id/etName"
+            android:hint="key 名称"
+            android:inputType="text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:text="推送模式"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_secondary"
+            android:layout_marginTop="10dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+        <RadioGroup
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <RadioButton
+                android:id="@+id/rbModeDefault"
+                android:text="默认（title/body）"
+                android:textSize="14sp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+            <RadioButton
+                android:id="@+id/rbModeCustom"
+                android:text="自定义（JSON 路径）"
+                android:textSize="14sp"
+                android:layout_marginStart="12dp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/lblTitlePath"
+            android:text="标题提取路径 title_path（如 event.alerts.0.title）"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+        <EditText
+            android:id="@+id/etTitlePath"
+            android:hint="留空回退默认字段"
+            android:inputType="text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:text="内容提取路径 body_path（如 event.message）"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_secondary"
+            android:layout_marginTop="6dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+        <EditText
+            android:id="@+id/etBodyPath"
+            android:hint="留空回退默认字段"
+            android:inputType="text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <CheckBox
+            android:id="@+id/cbActive"
+            android:text="启用此 key（停用后 webhook 调用被拒绝，不推送）"
+            android:textSize="14sp"
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+    </LinearLayout>
+</ScrollView>

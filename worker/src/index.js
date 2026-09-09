@@ -1,7 +1,7 @@
 // Worker 入口：路由 + CORS
 import { json } from './utils.js';
 import { register, login, changePassword, verifyJWT } from './auth.js';
-import { createKey, listKeys, revokeKey } from './keys.js';
+import { createKey, listKeys, updateKey, revokeKey } from './keys.js';
 import { listNotifications, getNotification, markRead, markDelivered, deleteNotification } from './notifications.js';
 import { handleWebhook } from './webhook.js';
 import { PushHub } from './push.js';

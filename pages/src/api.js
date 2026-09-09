@@ -28,6 +28,7 @@ export const api = {
   changePassword: (oldPassword, newPassword) => req('/password', 'POST', { oldPassword, newPassword }),
   createKey: (name) => req('/keys', 'POST', { name }),
   listKeys: () => req('/keys'),
+  updateKey: (id, body) => req(`/keys/${id}`, 'PUT', body),
   revokeKey: (id) => req(`/keys/${id}`, 'DELETE'),
   listNotifications: (keyId) => req(`/notifications${keyId ? `?key_id=${keyId}` : ''}`),
 };
