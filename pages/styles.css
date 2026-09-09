@@ -276,3 +276,20 @@ tbody tr:hover td { background: #f8fafd; }
 table code { font-size: 12px; }
 
 .card-head .btn.primary { padding: 8px 18px; }
+
+/* ---- 历史原文悬浮面板 ---- */
+.raw-trigger { cursor: help; font-size: 12px; color: var(--muted); border-bottom: 1px dashed var(--border); }
+.raw-trigger:hover { color: var(--brand, #4a6cf7); border-color: currentColor; }
+.raw-pop {
+  position: fixed; z-index: 1000; overflow: auto;
+  background: #1d2430; color: #dbe4f0; border-radius: 10px;
+  padding: 10px 12px; font-size: 12px; line-height: 1.5;
+  box-shadow: 0 12px 32px rgba(15, 22, 34, .35);
+  pointer-events: auto;
+}
+.raw-pop .raw-pop-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  margin-bottom: 6px; font-weight: 600; color: #fff; font-size: 12px;
+}
+.raw-pop pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, Menlo, monospace; }
+.badge.empty-msg { background: #eef0f4; color: #6b7484; }

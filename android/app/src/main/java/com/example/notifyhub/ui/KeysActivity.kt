@@ -9,7 +9,6 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
-import android.widget.RadioButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -122,18 +121,13 @@ class KeysActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- 编辑弹窗：名称 / 启停 / 模式 ----------
+    // ---------- 编辑弹窗：名称 / 启停 ----------
     private fun openEdit(k: KeyItem) {
         val view = layoutInflater.inflate(R.layout.dialog_edit_key, null)
         val etName = view.findViewById<EditText>(R.id.etName)
-        val etBodyPath = view.findViewById<EditText>(R.id.etBodyPath)
-        val rbDefault = view.findViewById<RadioButton>(R.id.rbModeDefault)
-        val rbCustom = view.findViewById<RadioButton>(R.id.rbModeCustom)
         val cbActive = view.findViewById<CheckBox>(R.id.cbActive)
 
         etName.setText(k.name)
-        if (k.mode == "custom") rbCustom.isChecked = true else rbDefault.isChecked = true
-        etBodyPath.setText(k.bodyPath ?: "")
         cbActive.isChecked = k.active == 1
 
         val dialog = AlertDialog.Builder(this)
@@ -149,7 +143,6 @@ class KeysActivity : AppCompatActivity() {
                 Toast.makeText(this, "名称不能为空", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            val mode = if (rbCustom.isChecked) "custom" else "default"
             lifecycleScope.launch {
                 try {
                     Api.safe {
@@ -157,9 +150,7 @@ class KeysActivity : AppCompatActivity() {
                             k.id,
                             UpdateKeyReq(
                                 name = name,
-                                active = cbActive.isChecked,
-                                mode = mode,
-                                bodyPath = etBodyPath.text.toString().trim()
+                                active = cbActive.isChecked
                             )
                         )
                     }
@@ -180,7 +171,6 @@ class KeysActivity : AppCompatActivity() {
         inner class VH(v: View) : RecyclerView.ViewHolder(v) {
             val tvName: TextView = v.findViewById(R.id.tvName)
             val tvStatus: TextView = v.findViewById(R.id.tvStatus)
-            val tvMode: TextView = v.findViewById(R.id.tvMode)
             val tvMeta: TextView = v.findViewById(R.id.tvMeta)
             val btnTest: Button = v.findViewById(R.id.btnTest)
             val btnHistory: Button = v.findViewById(R.id.btnHistory)
@@ -204,10 +194,8 @@ class KeysActivity : AppCompatActivity() {
                 h.tvStatus.setBackgroundResource(R.drawable.bg_chip_off)
                 h.tvStatus.setTextColor(0xFF8A93A6.toInt())
             }
-            h.tvMode.text = if (k.mode == "custom") "自定义" else "默认"
             val used = k.lastUsed?.let { "最近使用 ${fmt.format(Date(it))}" } ?: "从未使用"
-            h.tvMeta.text = "…${(k.keyFull ?: k.key).takeLast(6)} · $used" +
-                if (k.mode == "custom") "\n内容← ${k.bodyPath ?: "未配置"}" else ""
+            h.tvMeta.text = "…${(k.keyFull ?: k.key).takeLast(6)} · $used"
             h.itemView.alpha = if (on) 1f else 0.62f
             h.btnTest.isEnabled = on
             h.btnTest.setOnClickListener { sendTest(k, h.btnTest) }

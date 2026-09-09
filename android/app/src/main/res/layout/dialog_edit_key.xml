@@ -27,50 +27,7 @@
             android:layout_height="wrap_content" />
 
         <TextView
-            android:text="推送模式"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_secondary"
-            android:layout_marginTop="10dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <RadioGroup
-            android:orientation="horizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-            <RadioButton
-                android:id="@+id/rbModeDefault"
-                android:text="默认（message）"
-                android:textSize="14sp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-            <RadioButton
-                android:id="@+id/rbModeCustom"
-                android:text="自定义（JSON 路径）"
-                android:textSize="14sp"
-                android:layout_marginStart="12dp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-        </RadioGroup>
-
-        <TextView
-            android:id="@+id/lblBodyPath"
-            android:text="内容提取路径 body_path（如 $.event.message）"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_secondary"
-            android:layout_marginTop="6dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <EditText
-            android:id="@+id/etBodyPath"
-            android:hint="留空回退 message"
-            android:inputType="text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:text="通知标题固定为 key 名称，不参与提取"
+            android:text="通知标题固定为 key 名称，调用只需传 message 参数"
             android:textSize="12sp"
             android:textColor="@color/text_muted"
             android:layout_marginTop="6dp"

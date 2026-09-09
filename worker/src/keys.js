@@ -1,4 +1,4 @@
-// key 管理：生成 / 列表 / 编辑（名称、状态、自定义模式）/ 吊销
+// key 管理：生成 / 列表 / 编辑（名称、状态）/ 吊销
 import { json, readJson } from './utils.js';
 
 function genKey() {
@@ -13,21 +13,21 @@ export async function createKey(request, env, userId) {
   const name = String(body.name || 'default').slice(0, 64);
   const key = genKey();
   const res = await env.DB.prepare(
-    'INSERT INTO keys (user_id, key, name, created_at, active, mode) VALUES (?,?,?,?,1,?)'
-  ).bind(userId, key, name, Date.now(), String(body.mode || 'default') === 'custom' ? 'custom' : 'default').run();
+    'INSERT INTO keys (user_id, key, name, created_at, active) VALUES (?,?,?,?,1)'
+  ).bind(userId, key, name, Date.now()).run();
   return json({ id: res.meta.last_row_id, key, name, createdAt: Date.now() }, 201);
 }
 
 export async function listKeys(request, env, userId) {
   const rows = await env.DB.prepare(
-    'SELECT id, name, key, created_at, last_used, active, mode, body_path FROM keys WHERE user_id = ? ORDER BY id DESC'
+    'SELECT id, name, key, created_at, last_used, active FROM keys WHERE user_id = ? ORDER BY id DESC'
   ).bind(userId).all();
   // key 明文返回（自托管场景无需隐藏），Web 端可随时查看/复制
   const keys = (rows.results || []).map((r) => ({ ...r, keyFull: r.key }));
   return json({ keys });
 }
 
-// 编辑 key：名称 / 启停 / 自定义模式参数（启用中改名为合法字符串即可）
+// 编辑 key：名称 / 启停（启用中改名为合法字符串即可）
 export async function updateKey(request, env, userId, id) {
   const body = await readJson(request);
   const sets = [];
@@ -37,12 +37,6 @@ export async function updateKey(request, env, userId, id) {
   }
   if (typeof body.active === 'boolean') {
     sets.push('active=?'); vals.push(body.active ? 1 : 0);
-  }
-  if (body.mode !== undefined) {
-    sets.push('mode=?'); vals.push(String(body.mode) === 'custom' ? 'custom' : 'default');
-  }
-  if (body.body_path !== undefined) {
-    sets.push('body_path=?'); vals.push(body.body_path ? String(body.body_path).slice(0, 200) : null);
   }
   if (!sets.length) return json({ error: 'nothing to update' }, 400);
   vals.push(id, userId);

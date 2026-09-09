@@ -142,17 +142,9 @@ function renderDocs() {
 requests.post('${API_BASE}/hook/<KEY>', json={
     'message': 'CPU 使用率超过 90%',
 })`,
-    // 5: 自定义模式 payload
-    `// 第三方系统原样 POST 的 payload（不需要改造它）：
-{
-  "event": {
-    "alerts": [{ "message": "node-1 CPU 92%" }]
-  }
-}
-// key 配置：body_path = $.event.alerts.0.message
-// 手机收到的通知：标题 = key 名称，内容「node-1 CPU 92%」`,
-    // 6: 响应
+    // 5: 响应
     `{ "ok": true, "id": 71 }                      // 正常入库并推送
+{ "ok": true, "id": 72, "empty": true }        // message 为空：只入库不推送（历史显示「空消息」）
 { "ok": true, "deduplicated": true, "id": 70 } // 显式 dedup_key 重复，未重复推送
 { "error": "invalid key" }                     // key 不存在（404）
 { "error": "key is disabled" }                 // key 已停用（403）`,
@@ -188,14 +180,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
     </div>
 
     <div class="card doc-card">
-      <h2><span class="doc-num">3</span>自定义模式 · 接入第三方系统</h2>
-      <p class="hint">监控、CI 等第三方系统推送的 JSON 往往字段固定且不是 message。给 key 开启「自定义模式」并配置内容提取路径后，可以把这类 payload <b>原样转发</b>，由服务端提取通知内容——无需改造调用方。</p>
-      <p class="hint">路径语法：点分路径，数组用下标；<code>$</code> 表示 JSON 本身（可省略前缀），<code>$</code> 单独使用时表示整个 JSON 字符串。示例：</p>
-      <div class="doc-code"><code>${escapeHtml(samples[5])}</code><button class="btn mini doc-copy">复制</button></div>
-      <p class="hint">提取结果为空时自动回退 message 参数，所以两种 payload 可以混用同一个 key。在「Key 管理 → ⋯ → 编辑」中切换模式并填写 body_path。</p>    </div>
-
-    <div class="card doc-card">
-      <h2><span class="doc-num">4</span>响应与防重</h2>
+      <h2><span class="doc-num">3</span>响应与防重</h2>
       <div class="doc-code"><code>${escapeHtml(samples[6])}</code><button class="btn mini doc-copy">复制</button></div>
       <p class="hint"><b>防重语义</b>：服务端默认每条消息互不重复（不做内容去重）。只有当调用方显式传了 <code>dedup_key</code> 时才做去重——适合「发送超时后重试」的场景，避免重试导致重复弹通知。每条消息都会携带唯一防重 key 下发给 App，用于识别服务端重推。</p>
     </div>`;
@@ -215,7 +200,7 @@ async function renderKeys() {
         <h2>我的 Key</h2>
         <button class="btn primary" id="btn-new-key">＋ 新建 Key</button>
       </div>
-      <p class="hint" style="margin-top:-6px;margin-bottom:12px;">通知标题固定为 key 名称，调用只需传 message 参数；自定义模式按 JSON 路径提取，$ 表示 JSON 本身（如 $.msg）。接入方式见「接入文档」。</p>
+      <p class="hint" style="margin-top:-6px;margin-bottom:12px;">通知标题固定为 key 名称，调用只需传 message 参数。接入方式见「接入文档」。</p>
       <div id="key-list"><p class="hint">加载中…</p></div>
     </div>`;
   $('#btn-new-key').onclick = () => openKeyCreate();
@@ -280,13 +265,12 @@ async function loadList() {
         <div class="key-main">
           <span class="key-name">${escapeHtml(k.name)}</span>
           <span class="badge ${k.active ? 'on' : 'off'}">${k.active ? '启用中' : '已停用'}</span>
-          <span class="badge mode">${k.mode === 'custom' ? '自定义' : '默认'}</span>
+          <span class="badge mode">默认</span>
           <code class="key-url">${escapeHtml(k.keyFull || k.key)}</code>
           <button class="key-more" data-more="${k.id}" aria-label="操作菜单">⋯</button>
         </div>
         <div class="key-sub">
           <span class="hint">最近使用：${k.last_used ? new Date(k.last_used).toLocaleString() : '从未使用'}</span>
-          ${k.mode === 'custom' ? `<span class="hint">内容← ${escapeHtml(k.body_path || '(未配置)')}</span>` : ''}
         </div>
       </div>`).join('')}</div>
     <p class="msg" id="test-msg"></p>`;
@@ -357,7 +341,7 @@ async function loadList() {
   } catch (err) { box.innerHTML = `<p class="msg">${err.message}</p>`; }
 }
 
-// key 编辑弹窗：名称 / 启停 / 默认-自定义模式（JSON 路径）
+// key 编辑弹窗：名称 / 启停
 function openKeyEdit(k) {
   const root_ = $('#modal-root');
   root_.innerHTML = `
@@ -367,16 +351,7 @@ function openKeyEdit(k) {
       <form id="edit-form">
         <label>名称</label>
         <input name="name" value="${escapeHtml(k.name)}" required />
-        <label>推送模式</label>
-        <div class="seg">
-          <label class="seg-item"><input type="radio" name="mode" value="default" ${k.mode !== 'custom' ? 'checked' : ''}/><span>默认</span></label>
-          <label class="seg-item"><input type="radio" name="mode" value="custom" ${k.mode === 'custom' ? 'checked' : ''}/><span>自定义（JSON 路径提取）</span></label>
-        </div>
-        <div id="custom-fields" ${k.mode === 'custom' ? '' : 'hidden'}>
-          <label>内容提取路径（body_path）</label>
-          <input name="body_path" value="${escapeHtml(k.body_path || '')}" placeholder="如：$.event.message" />
-          <p class="hint">标题固定为 key 名称，不参与提取。内容路径为点分路径，数组用下标（$.a.b.0.c），$ 表示 JSON 本身可省略；提取为空时回退 message。</p>
-        </div>
+        <p class="hint">通知标题固定为 key 名称，调用只需传 message 参数。</p>
         <label class="check-row"><input type="checkbox" name="active" ${k.active ? 'checked' : ''}/> 启用此 key（停用后 webhook 调用将被拒绝，不推送消息）</label>
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="edit-cancel">取消</button>
@@ -387,8 +362,6 @@ function openKeyEdit(k) {
     </div>
   </div>`;
   const form = $('#edit-form');
-  const syncCustom = () => { $('#custom-fields').hidden = form.mode.value !== 'custom'; };
-  form.querySelectorAll('input[name=mode]').forEach((r) => { r.onchange = syncCustom; });
   $('#edit-cancel').onclick = () => { root_.innerHTML = ''; };
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -397,8 +370,6 @@ function openKeyEdit(k) {
       await api.updateKey(k.id, {
         name: form.name.value.trim(),
         active: form.active.checked,
-        mode: form.mode.value,
-        body_path: form.body_path.value.trim(),
       });
       root_.innerHTML = '';
       loadList();
@@ -432,10 +403,12 @@ async function openKeyHistory(k) {
       </div>
     </div>
   </div>`;
-  $('#hist-close').onclick = () => { root_.innerHTML = ''; };
+  $('#hist-close').onclick = () => { document.querySelectorAll('.raw-pop').forEach((p) => p.remove()); root_.innerHTML = ''; };
 
   async function loadPage() {
     const body = $('#hist-body');
+    // 清理上一页残留的悬浮原文面板
+    document.querySelectorAll('.raw-pop').forEach((p) => p.remove());
     body.innerHTML = '<p class="hint">加载中…</p>';
     try {
       const { notifications, total } = await api.listNotifications(k.id, HIST_PAGE_SIZE, page * HIST_PAGE_SIZE);
@@ -448,40 +421,58 @@ async function openKeyHistory(k) {
       body.innerHTML = `
         <table>
           <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th><th>原文</th></tr></thead>
-          <tbody>${notifications.map((n, i) => `
+          <tbody>${notifications.map((n, i) => {
+            const empty = !n.body || !String(n.body).trim();
+            const status = empty
+              ? '<span class="badge empty-msg">空消息</span>'
+              : (n.delivered_at
+                ? `<b class="ok">已触达</b><br/><span class="hint xs">${new Date(n.delivered_at).toLocaleString()}</span>`
+                : '<b class="warn">未触达</b>');
+            return `
             <tr>
               <td>${escapeHtml(n.title)}</td>
-              <td>${escapeHtml((n.body || '').slice(0, 80))}</td>
+              <td>${empty ? '<span class="hint xs">（无内容）</span>' : escapeHtml(String(n.body).slice(0, 80))}</td>
               <td>${new Date(n.created_at).toLocaleString()}</td>
-              <td>${n.delivered_at
-                ? `<b class="ok">已触达</b><br/><span class="hint xs">${new Date(n.delivered_at).toLocaleString()}</span>`
-                : '<b class="warn">未触达</b>'}</td>
-              <td>${n.payload ? `<button class="btn mini" data-raw="${i}">查看</button>` : '<span class="hint xs">无</span>'}</td>
-            </tr>`).join('')}</tbody>
-        </table>
-        <div id="hist-raw"></div>`;
+              <td>${status}</td>
+              <td class="raw-cell">${n.payload
+                ? `<code class="raw-trigger" data-raw="${i}">查看</code>`
+                : '<span class="hint xs">无</span>'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>`;
       $('#hist-total').textContent = `共 ${total} 条 · 第 ${page + 1} / ${pages} 页`;
       $('#hist-prev').disabled = page <= 0;
       $('#hist-next').disabled = page >= pages - 1;
-      // 「原文」按钮：展示调用方发送的完整未解析 payload
-      const rawBox = $('#hist-raw');
-      const showRaw = (n, btn) => {
-        const pretty = prettyJson(n.payload);
-        rawBox.hidden = false;
-        rawBox.innerHTML = `
-          <div class="doc-code" style="max-height:260px;overflow:auto;"><code>${escapeHtml(pretty)}</code><button class="btn mini doc-copy">复制</button></div>
-          <p class="hint xs">↑ 通知 #${n.id} 的原始请求参数</p>`;
-        rawBox.querySelector('.doc-copy').onclick = (e) => copyText(pretty, e.target);
-        btn.textContent = '收起';
-      };
-      body.querySelectorAll('[data-raw]').forEach((btn) => {
-        btn.onclick = () => {
-          const n = notifications[Number(btn.dataset.raw)];
-          if (!n) return;
-          if (btn.textContent === '收起') { rawBox.hidden = true; rawBox.innerHTML = ''; btn.textContent = '查看'; return; }
-          body.querySelectorAll('[data-raw]').forEach((b) => { if (b !== btn) { b.textContent = '查看'; } });
-          showRaw(n, btn);
+      // 「原文」悬浮展示：鼠标悬停在查看上，右侧自动浮现完整未解析 payload
+      const pop = document.createElement('div');
+      pop.className = 'raw-pop';
+      pop.hidden = true;
+      document.body.appendChild(pop);
+      const hidePop = () => { pop.hidden = true; };
+      body.querySelectorAll('[data-raw]').forEach((el) => {
+        const show = () => {
+          const n = notifications[Number(el.dataset.raw)];
+          if (!n || !n.payload) return;
+          const pretty = prettyJson(n.payload);
+          pop.innerHTML = `
+            <div class="raw-pop-head">通知 #${n.id} 原始请求参数 <button class="btn mini doc-copy">复制</button></div>
+            <pre>${escapeHtml(pretty)}</pre>`;
+          pop.querySelector('.doc-copy').onclick = (e) => { e.stopPropagation(); copyText(pretty, e.target); };
+          pop.hidden = false;
+          // 定位：优先展示在单元格右侧，放不下则放左侧，垂直方向跟随并限制在视口内
+          const r = el.getBoundingClientRect();
+          const pw = Math.min(420, window.innerWidth - 24);
+          const ph = Math.min(340, window.innerHeight - 24);
+          let left = r.right + 10;
+          if (left + pw > window.innerWidth - 8) left = Math.max(8, r.left - pw - 10);
+          let top = Math.min(Math.max(8, r.top - 12), window.innerHeight - ph - 8);
+          pop.style.left = left + 'px';
+          pop.style.top = top + 'px';
+          pop.style.maxWidth = pw + 'px';
+          pop.style.maxHeight = ph + 'px';
         };
+        el.addEventListener('mouseenter', show);
+        el.addEventListener('mouseleave', hidePop);
       });
     } catch (err) {
       body.innerHTML = `<p class="msg">加载失败：${err.message}</p>`;
@@ -515,7 +506,7 @@ function renderAccount() {
       <p>API 地址：<code>${API_BASE}</code></p>
       <p>Webhook 模板：<code>${API_BASE}/hook/&lt;KEY&gt;</code></p>
       <p>调用方式：<code>GET</code> 或 <code>POST</code>（JSON / 表单 / 纯文本均可）</p>
-      <p class="hint">默认模式只需传 message 参数（标题固定为 key 名称）；自定义模式按 JSON 路径提取，$ 表示 JSON 本身（如 $.msg）。详见「接入文档」。</p>
+      <p class="hint">默认调用只需传 message 参数（标题固定为 key 名称）。详见「接入文档」。</p>
     </div>`;
   $('#pw-form').onsubmit = async (e) => {
     e.preventDefault();

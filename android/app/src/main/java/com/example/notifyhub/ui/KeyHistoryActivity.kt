@@ -77,9 +77,13 @@ class KeyHistoryActivity : AppCompatActivity() {
                 }
                 total = resp.total
                 resp.notifications.forEach { n ->
+                    // 空消息与触达状态互斥：内容为空的服务端不会推送，自然无触达概念
                     rows.add(
-                        if (n.deliveredAt != null) Row(n, "已触达", 0xFF17994F.toInt(), R.drawable.bg_chip_on)
-                        else Row(n, "未触达", 0xFFC07F00.toInt(), R.drawable.bg_chip_off)
+                        when {
+                            n.body.isNullOrBlank() -> Row(n, "空消息", 0xFF8A93A6.toInt(), R.drawable.bg_chip_off)
+                            n.deliveredAt != null -> Row(n, "已触达", 0xFF17994F.toInt(), R.drawable.bg_chip_on)
+                            else -> Row(n, "未触达", 0xFFC07F00.toInt(), R.drawable.bg_chip_off)
+                        }
                     )
                 }
                 tvMsg.text = "已显示 ${rows.size} / 共 $total 条"
