@@ -1,7 +1,7 @@
 // Worker 入口：路由 + CORS
 import { json } from './utils.js';
 import { register, login, changePassword, verifyJWT } from './auth.js';
-import { createKey, listKeys, updateKey, revokeKey } from './keys.js';
+import { createKey, listKeys, updateKey, deleteKey } from './keys.js';
 import { listNotifications, getNotification, markRead, markDelivered, deleteNotification } from './notifications.js';
 import { handleWebhook } from './webhook.js';
 import { PushHub } from './push.js';
@@ -86,7 +86,7 @@ export default {
       if (p.startsWith('/keys/') && request.method === 'DELETE') {
         const uid = await getUserId(request, env);
         const e = requireAuth(uid); if (e) return e;
-        return revokeKey(request, env, uid, p.split('/')[2]);
+        return deleteKey(request, env, uid, p.split('/')[2]);
       }
 
       // 通知（支持 ?key_id= 按 key 过滤，供发送历史查询）

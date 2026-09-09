@@ -47,7 +47,10 @@ class KeysActivity : AppCompatActivity() {
 
         // 收件箱移除后由首页负责拉起前台推送服务，保证 WS 实时推送在线
         val svc = Intent(this, com.example.notifyhub.data.PushService::class.java)
-        if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(svc) else startService(svc)
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(svc) else startService(svc)
+        } catch (_: Exception) {
+        }
         // Android 13+ 动态请求通知权限
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -120,6 +123,30 @@ class KeysActivity : AppCompatActivity() {
                 btn.text = "测试"
             }
         }
+    }
+
+    // ---------- 长按条目：删除 key ----------
+    private fun confirmDelete(k: KeyItem) {
+        AlertDialog.Builder(this)
+            .setTitle("删除 Key")
+            .setMessage("彻底删除「${k.name}」？\n该 key 的 Hook 地址将失效，全部发送历史一并清除，不可恢复。")
+            .setPositiveButton("删除") { _, _ ->
+                lifecycleScope.launch {
+                    try {
+                        Api.safe { Api.instance(this@KeysActivity).deleteKey(k.id) }
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@KeysActivity, "已删除「${k.name}」", Toast.LENGTH_SHORT).show()
+                            loadKeys()
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@KeysActivity, "删除失败：${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     // ---------- 编辑弹窗：名称 / 模式 / 模板 / 启停 ----------
@@ -218,6 +245,7 @@ class KeysActivity : AppCompatActivity() {
                 startActivity(i)
             }
             h.btnEdit.setOnClickListener { openEdit(k) }
+            h.itemView.setOnLongClickListener { confirmDelete(k); true }
         }
 
         override fun getItemCount() = keys.size

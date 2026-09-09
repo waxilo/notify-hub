@@ -58,7 +58,8 @@ interface NotifyApi {
     @POST("/api/keys") suspend fun createKey(@Body req: CreateKeyReq): KeyResp
     @GET("/api/keys") suspend fun listKeys(): KeysResp
     @PUT("/api/keys/{id}") suspend fun updateKey(@Path("id") id: Long, @Body req: UpdateKeyReq): Response<Unit>
-    @DELETE("/api/keys/{id}") suspend fun revokeKey(@Path("id") id: Long): Response<Unit>
+    // DELETE /api/keys/{id}：彻底删除 key 及其全部发送历史（服务端同一路由）
+    @DELETE("/api/keys/{id}") suspend fun deleteKey(@Path("id") id: Long): Response<Unit>
     @GET("/api/notifications") suspend fun listNotifications(
         @Query("limit") limit: Int = 10,
         @Query("offset") offset: Int = 0,

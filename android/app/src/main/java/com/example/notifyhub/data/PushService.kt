@@ -39,7 +39,15 @@ class PushService : Service() {
     override fun onCreate() {
         super.onCreate()
         ensureChannel()
-        startForeground(FOREGROUND_ID, buildForegroundNotification())
+        // 系统在后台重启 START_STICKY 服务时，Android 12+ 可能抛
+        // ForegroundServiceStartNotAllowedException：必须兜底 stopSelf，否则进程反复崩溃，
+        // 表现为 App 闪退且连登录页都进不去
+        try {
+            startForeground(FOREGROUND_ID, buildForegroundNotification())
+        } catch (e: Exception) {
+            stopSelf()
+            return
+        }
         connect()
     }
 

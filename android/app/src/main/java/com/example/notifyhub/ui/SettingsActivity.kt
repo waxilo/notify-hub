@@ -80,11 +80,18 @@ class SettingsActivity : AppCompatActivity() {
     private fun doLogout() {
         // 清除登录态并停止前台推送服务（WS 断开、常驻通知移除）
         TokenStore(this).clear()
-        stopService(Intent(this, com.example.notifyhub.data.PushService::class.java))
+        try {
+            stopService(Intent(this, com.example.notifyhub.data.PushService::class.java))
+        } catch (_: Exception) {
+        }
         val i = Intent(this, LoginActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        startActivity(i)
-        finish()
+        try {
+            startActivity(i)
+        } catch (_: Exception) {
+        }
+        // 结束本任务栈内所有页面，确保回到登录页（比单独 finish 更干净）
+        finishAffinity()
     }
 
     override fun onResume() {
@@ -100,14 +107,28 @@ class SettingsActivity : AppCompatActivity() {
                 latest == null -> tvUpdate.text = "检查失败：暂无可用版本信息或网络不通"
                 UpdateChecker.isNewer(latest, this@SettingsActivity) -> {
                     tvUpdate.text = "发现新版本 v${latest.versionName ?: latest.versionCode}"
-                    AlertDialog.Builder(this@SettingsActivity)
-                        .setTitle("发现新版本")
-                        .setMessage("最新版本：v${latest.versionName ?: "?"}（code ${latest.versionCode}）\n下载完成后将自动打开安装程序。")
-                        .setPositiveButton("下载") { _, _ ->
-                            lifecycleScope.launch { downloadAndInstall(latest, tvUpdate) }
-                        }
-                        .setNegativeButton("以后再说", null)
-                        .show()
+                    // 上次下载完成但未安装（如点了"稍后安装"）：直接安装，不重复下载
+                    val ready = UpdateChecker.pendingApk(this@SettingsActivity, latest)
+                    if (ready != null) {
+                        AlertDialog.Builder(this@SettingsActivity)
+                            .setTitle("安装包已就绪")
+                            .setMessage("新版本 v${latest.versionName ?: "?"}（code ${latest.versionCode}）已下载完成，直接安装即可，无需重新下载。")
+                            .setPositiveButton("安装") { _, _ ->
+                                UpdateChecker.installApk(this@SettingsActivity, ready)
+                                tvUpdate.text = "已打开安装程序，确认安装即可"
+                            }
+                            .setNegativeButton("以后再说", null)
+                            .show()
+                    } else {
+                        AlertDialog.Builder(this@SettingsActivity)
+                            .setTitle("发现新版本")
+                            .setMessage("最新版本：v${latest.versionName ?: "?"}（code ${latest.versionCode}）\n下载完成后将自动打开安装程序。")
+                            .setPositiveButton("下载") { _, _ ->
+                                lifecycleScope.launch { downloadAndInstall(latest, tvUpdate) }
+                            }
+                            .setNegativeButton("以后再说", null)
+                            .show()
+                    }
                 }
                 else -> tvUpdate.text = "已是最新版本"
             }

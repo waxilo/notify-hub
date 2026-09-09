@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
-import { API_BASE } from './config.js?v=20260909c';
-import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js?v=20260909c';
+import { API_BASE } from './config.js?v=20260909d';
+import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js?v=20260909d';
 
 const $ = (sel) => document.querySelector(sel);
 const root = $('#app');
@@ -324,8 +324,9 @@ async function loadList() {
           ['历史', () => openKeyHistory(k)],
           ['编辑', () => openKeyEdit(k)],
           k.active
-            ? ['停用', async () => { await api.revokeKey(k.id); loadList(); }]
+            ? ['停用', async () => { await api.updateKey(k.id, { active: false }); loadList(); }]
             : ['启用', async () => { await api.updateKey(k.id, { active: true }); loadList(); }],
+          ['删除', () => openKeyDelete(k)],
         ];
         menu.innerHTML = items.map(([label], i) => `<button class="btn mini${label === '停用' ? ' danger' : ''}" data-i="${i}">${label}</button>`).join('');
         menu.querySelectorAll('[data-i]').forEach((btn) => {
@@ -357,6 +358,31 @@ async function loadList() {
       }
     }
   } catch (err) { box.innerHTML = `<p class="msg">${err.message}</p>`; }
+}
+
+// 删除 key 确认弹窗：彻底删除 key 及其全部发送历史，不可恢复
+function openKeyDelete(k) {
+  const root_ = $('#modal-root');
+  root_.innerHTML = `
+  <div class="modal-mask">
+    <div class="modal card">
+      <h2>删除 Key「${escapeHtml(k.name)}」</h2>
+      <p class="hint">将<b>彻底删除</b>此 key 与它的 Hook 地址，同时清除该 key 的全部发送历史，<b>删除后不可恢复</b>。正在使用此 key 的调用方会开始收到 404，请确认已下线。</p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="del-cancel">取消</button>
+        <button type="button" class="btn primary danger" id="del-confirm">确认删除</button>
+      </div>
+      <p class="msg" id="del-msg"></p>
+    </div>
+  </div>`;
+  $('#del-cancel').onclick = () => { root_.innerHTML = ''; };
+  $('#del-confirm').onclick = async () => {
+    try {
+      await api.deleteKey(k.id);
+      root_.innerHTML = '';
+      loadList();
+    } catch (err) { $('#del-msg').textContent = err.message; }
+  };
 }
 
 // key 编辑弹窗：名称 / 启停

@@ -53,7 +53,10 @@ export async function updateKey(request, env, userId, id) {
   return json({ ok: true });
 }
 
-export async function revokeKey(request, env, userId, id) {
-  await env.DB.prepare('UPDATE keys SET active=0 WHERE id=? AND user_id=?').bind(id, userId).run();
+// 彻底删除 key：连同该 key 的全部发送历史一并清除（停用请用 updateKey 的 active=false）
+export async function deleteKey(request, env, userId, id) {
+  await env.DB.prepare('DELETE FROM notifications WHERE user_id=? AND key_id=?').bind(userId, id).run();
+  const res = await env.DB.prepare('DELETE FROM keys WHERE id=? AND user_id=?').bind(id, userId).run();
+  if (!res.meta.changes) return json({ error: 'key not found' }, 404);
   return json({ ok: true });
 }

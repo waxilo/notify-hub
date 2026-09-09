@@ -50,7 +50,7 @@ export const api = {
   createKey: (name) => req('/keys', 'POST', { name }),
   listKeys: () => req('/keys'),
   updateKey: (id, body) => req(`/keys/${id}`, 'PUT', body),
-  revokeKey: (id) => req(`/keys/${id}`, 'DELETE'),
+  deleteKey: (id) => req(`/keys/${id}`, 'DELETE'),
   listNotifications: (keyId, limit = 10, offset = 0) =>
     req(`/notifications?limit=${limit}&offset=${offset}${keyId ? `&key_id=${keyId}` : ''}`),
 };

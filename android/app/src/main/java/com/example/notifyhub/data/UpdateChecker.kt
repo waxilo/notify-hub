@@ -37,6 +37,7 @@ object UpdateChecker {
     private const val DOWNLOAD_NOTIF_ID = 2002
     private const val PREFS = "nh_update"
     private const val KEY_PENDING = "pending_apk"
+    private const val KEY_DOWNLOADED = "downloaded_code"  // 已完整下载的 APK 对应 versionCode
 
     fun installedVersionCode(ctx: Context): Long {
         val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
@@ -132,6 +133,9 @@ object UpdateChecker {
             }
             nm.cancel(DOWNLOAD_NOTIF_ID)
             onProgress?.invoke(100)
+            // 标记该版本安装包已完整落盘：后续点「检测更新」可直接安装，无需重复下载
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putInt(KEY_DOWNLOADED, info.versionCode.toInt()).apply()
             file
         }
     }
@@ -183,6 +187,18 @@ object UpdateChecker {
             doInstall(ctx, file)
             Toast.makeText(ctx, "已打开安装程序", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    // 已完整下载且版本匹配的安装包；不存在/版本不匹配返回 null（并清理标记）
+    fun pendingApk(ctx: Context, info: UpdateInfo): File? {
+        val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val file = File(ctx.cacheDir, "update.apk")
+        val ok = sp.getInt(KEY_DOWNLOADED, -1) == info.versionCode.toInt() && file.exists() && file.length() > 0
+        if (!ok) {
+            sp.edit().remove(KEY_DOWNLOADED).apply()
+            return null
+        }
+        return file
     }
 
     // 一键流程：静默下载 → 跳安装；返回 "installing" 或 "need-permission"（授权后 onResume 自动续装）
