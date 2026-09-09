@@ -98,7 +98,16 @@ export default {
       if (p.startsWith('/notifications/') && p.endsWith('/delivered') && request.method === 'POST') {
         const uid = await getUserId(request, env);
         const e = requireAuth(uid); if (e) return e;
-        return markDelivered(request, env, uid, p.split('/')[2]);
+        const r = await markDelivered(request, env, uid, p.split('/')[2]);
+        // 通知 DO 取消该消息的重推任务
+        try {
+          const stub = env.PUSH_HUB.get(env.PUSH_HUB.idFromName(String(uid)));
+          await stub.fetch('https://do/delivered', {
+            method: 'POST',
+            body: JSON.stringify({ id: Number(p.split('/')[2]) }),
+          });
+        } catch { /* ignore */ }
+        return r;
       }
       if (p.startsWith('/notifications/') && p.endsWith('/read') && request.method === 'POST') {
         const uid = await getUserId(request, env);

@@ -33,6 +33,7 @@ class PushService : Service() {
     private var ws: WebSocket? = null
     private var retry = 0
     private var authFailed = false          // token 无效（401）时停止重试，等重新登录后再启动
+    private val recentKeys = HashMap<String, Long>()  // 防重缓存：key -> 首次收到时间戳
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
@@ -89,6 +90,11 @@ class PushService : Service() {
                 try {
                     val obj = JSONObject(text)
                     if (obj.optString("type") == "notification") {
+                        // 3 秒防重缓存：服务端超时重推同一条消息时，不重复弹通知
+                        val now = System.currentTimeMillis()
+                        recentKeys.entries.removeAll { now - it.value > DEDUP_WINDOW_MS }
+                        val dedupKey = obj.optString("dedup_key").ifEmpty { "id:${obj.optLong("id")}" }
+                        if (recentKeys.put(dedupKey, now) != null) return
                         showNotification(
                             obj.optString("title").ifEmpty { "新通知" },
                             obj.optString("body"),
@@ -190,5 +196,6 @@ class PushService : Service() {
         private const val PUSH_CHANNEL_ID = "notify_hub_push"
         private const val FG_CHANNEL_ID = "notify_hub_foreground"
         private const val FOREGROUND_ID = 1001
+        private const val DEDUP_WINDOW_MS = 3000L  // 防重缓存窗口：3 秒内同 key 只弹一次
     }
 }

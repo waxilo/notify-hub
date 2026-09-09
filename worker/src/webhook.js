@@ -1,7 +1,20 @@
 // 通用 webhook：GET/POST 均可，按 key 路由到对应用户并写入通知
-//   GET  /hook/:key?title=...&body=...&message=...
-//   POST /hook/:key  (JSON | form | 纯文本)
+//   GET  /hook/:key?title=...&body=...&message=...[&dedup_key=...]
+//   POST /hook/:key  (JSON | form | 纯文本；防重 key 可用头 X-Dedup-Key 或字段 dedup_key)
+// 防重：未传 key 时按「用户|key|标题|内容」自动生成哈希；同一防重 key 在 5 分钟窗口内
+// 只入库/推送一次，重复调用直接返回首条消息 id（deduplicated: true）
 import { json, readJson, readText } from './utils.js';
+
+const DEDUP_WINDOW_MS = 300_000;
+
+async function autoDedupKey(userId, keyId, title, body) {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${userId}|${keyId}|${title}|${body}`)
+  );
+  return 'auto-' + [...new Uint8Array(digest)].slice(0, 8)
+    .map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 export async function handleWebhook(request, env, key) {
   const row = await env.DB.prepare('SELECT id, user_id, active FROM keys WHERE key=?').bind(key).first();
@@ -10,6 +23,7 @@ export async function handleWebhook(request, env, key) {
   let title = '';
   let body = '';
   let payload = null;
+  let dedupKey = request.headers.get('x-dedup-key') || '';
 
   if (request.method === 'POST') {
     const ct = (request.headers.get('content-type') || '').toLowerCase();
@@ -18,11 +32,13 @@ export async function handleWebhook(request, env, key) {
         const data = await request.json();
         title = String(data.title ?? '');
         body = String(data.body ?? data.message ?? data.text ?? '');
+        dedupKey = dedupKey || String(data.dedup_key ?? '');
         payload = JSON.stringify(data);
       } else if (ct.includes('application/x-www-form-urlencoded') || ct.includes('multipart/form-data')) {
         const form = await request.formData();
         title = String(form.get('title') ?? '');
         body = String(form.get('body') ?? form.get('message') ?? form.get('text') ?? '');
+        dedupKey = dedupKey || String(form.get('dedup_key') ?? '');
         const obj = {};
         for (const [k, v] of form.entries()) obj[k] = v;
         payload = JSON.stringify(obj);
@@ -38,6 +54,7 @@ export async function handleWebhook(request, env, key) {
     const url = new URL(request.url);
     title = url.searchParams.get('title') || '';
     body = url.searchParams.get('body') || url.searchParams.get('message') || url.searchParams.get('text') || '';
+    dedupKey = dedupKey || url.searchParams.get('dedup_key') || '';
     const obj = {};
     for (const [k, v] of url.searchParams.entries()) obj[k] = v;
     payload = JSON.stringify(obj);
@@ -46,18 +63,28 @@ export async function handleWebhook(request, env, key) {
   if (!title && !body) title = 'Webhook 通知';
   if (title.length > 500) title = title.slice(0, 500);
   if (body.length > 8000) body = body.slice(0, 8000);
+  if (dedupKey.length > 128) dedupKey = dedupKey.slice(0, 128);
+  if (!dedupKey) dedupKey = await autoDedupKey(row.user_id, row.id, title, body);
 
   await env.DB.prepare('UPDATE keys SET last_used=? WHERE id=?').bind(Date.now(), row.id).run();
-  const res = await env.DB.prepare(
-    'INSERT INTO notifications (user_id, key_id, title, body, payload, created_at, read) VALUES (?,?,?,?,?,?,0)'
-  ).bind(row.user_id, row.id, title, body, payload, Date.now()).run();
 
-  // 实时推送：经 Durable Object 广播给该用户的在线 WebSocket 连接（失败不影响入库结果）
+  // 防重：窗口内同一防重 key 已存在则不重复入库/推送
+  const dup = await env.DB.prepare(
+    'SELECT id FROM notifications WHERE user_id=? AND dedup_key=? AND created_at>? ORDER BY id DESC LIMIT 1'
+  ).bind(row.user_id, dedupKey, Date.now() - DEDUP_WINDOW_MS).first();
+  if (dup) return json({ ok: true, deduplicated: true, id: dup.id });
+
+  const res = await env.DB.prepare(
+    'INSERT INTO notifications (user_id, key_id, dedup_key, title, body, payload, created_at, read) VALUES (?,?,?,?,?,?,?,0)'
+  ).bind(row.user_id, row.id, dedupKey, title, body, payload, Date.now()).run();
+
+  // 实时推送：经 Durable Object 广播 + 1 秒无触达回调自动重推（失败不影响入库结果）
   try {
     const stub = env.PUSH_HUB.get(env.PUSH_HUB.idFromName(String(row.user_id)));
     const msg = JSON.stringify({
       type: 'notification',
       id: res.meta.last_row_id,
+      dedup_key: dedupKey,
       title,
       body,
       created_at: Date.now(),
