@@ -1393,3 +1393,90 @@ permission」一段：
 只是不再有第二个调用方。同类 requestCode 偏移现在只剩 `FS_REQUEST_OFFSET` 与
 `DELETE_REQUEST_OFFSET` 两个，仍保持互不覆盖。
 
+---
+
+## 25. 开满权限仍无全屏：改用悬浮窗直绘（第三条通道，2026-09-10）
+
+### 25.1 复核结论：代码没有缺口，卡点在系统
+
+逐行核对了实现，四个环节都是对的：
+
+| 环节 | 状态 |
+|---|---|
+| `tryLaunchAlarmDirectly` 是否被调用 | ✅ 在 `onMessage` 里随 `startStrongVibrate` 一起调用 |
+| 悬浮窗 1×1 可见窗口（BAL 例外「应用具有可见窗口」） | ✅ `addView` 成功才继续 |
+| Android 14 的 PendingIntent 显式 opt-in | ✅ `MODE_BACKGROUND_ACTIVITY_START_ALLOWED` |
+| 告警页自身的锁屏能力 | ✅ `setShowWhenLocked` / `setTurnScreenOn` + Manifest 同名属性 |
+
+也就是说：**①② 两条通道的实现都是完整的，被拦的是「启动 Activity」这个动作本身。**
+
+官方文档（`background-starts`）确认的例外清单里，我们够得着的两条是
+「应用具有可见窗口」与「已获 SYSTEM_ALERT_WINDOW」；而国产 ROM 在此之上还有一道
+**「后台弹出界面」**开关（默认关闭，位置在「应用信息」里而不是「特殊应用权限」）——
+它是厂商自己的实现，一旦拦下，①② 会**同时**失效。这正是「三项权限全绿、依然只出横幅」。
+
+### 25.2 换的方案：把告警页画成悬浮窗
+
+关键认识：**悬浮窗不走「启动 Activity」这条路。** `WindowManager.addView` 由本进程直接完成，
+BAL 与「后台弹出界面」都管辖不到它，只需要悬浮窗权限 —— 而用户已经开了。
+
+于是新增第三条通道：**直接把 `activity_alarm.xml` 渲染到一个全屏 `TYPE_APPLICATION_OVERLAY`
+窗口上**，外观与 Activity 版完全一致（复用同一份布局）。
+
+| 项 | 取值 | 作用 |
+|---|---|---|
+| 窗口类型 | `TYPE_APPLICATION_OVERLAY` | 悬浮窗，唯一需 `SYSTEM_ALERT_WINDOW` |
+| `FLAG_SHOW_WHEN_LOCKED` | — | 盖在锁屏之上 |
+| `FLAG_TURN_SCREEN_ON` | — | 点亮屏幕 |
+| `FLAG_KEEP_SCREEN_ON` | — | 页面展示期间不熄屏（窗口移除即失效，不漏电） |
+| `FLAG_NOT_FOCUSABLE` | — | 不抢输入焦点；触摸事件仍投递到本窗口，按钮可点 |
+| 唤醒锁 | `ACQUIRE_CAUSES_WAKEUP`，10 秒 | `FLAG_TURN_SCREEN_ON` 对非 Activity 窗口各家支持不一，兜底（新增 `WAKE_LOCK` 权限） |
+
+### 25.3 触发时机：复核失败即自动切换
+
+不新增用户开关 —— 沿用已有的 2.5 秒复核：
+
+```
+直拉 Activity → 2.5s 后看 AlarmActivity 有没有 onCreate
+  ├─ 起了 → 记录「成功（Activity 通道）」，什么都不做
+  └─ 没起 → 记录被拦，立刻 showAlarmOverlay() 画悬浮窗
+              └─ 成功 → 「成功：全屏告警页已弹出（悬浮窗通道）」
+```
+
+好处：Activity 能用时优先用 Activity（有独立任务栈、返回键行为正常）；被拦时自动降级，
+用户不必自己去猜是哪个开关没开。**代价是最迟 2.5 秒后才出现悬浮窗** —— 期间震动照常，
+所以体感上仍是「一收到就开始响」。
+
+### 25.4 生命周期与停止路径
+
+悬浮窗的回收挂进了 `stopStrongVibrate()`，因此四条停止入口自动全部覆盖：
+
+| 入口 | 效果 |
+|---|---|
+| 悬浮窗上的「关闭」 | 停震 + 撤通知 + 撤悬浮窗 |
+| 通知被滑掉 / 告警页按钮 / 通知快捷停止 | 停震 → 连带撤悬浮窗 |
+| 30 秒超时 | 停震 → 连带撤悬浮窗；另有独立的 30 秒定时只撤窗 |
+| 服务 `onDestroy` | 显式 `hideAlarmOverlay()`，不留残影 |
+
+场景闸门不变：**亮屏且已解锁时三条通道都不走**，只给横幅（不抢占用户手上的事）。
+此时设置页「上次强力提醒」会显示「未尝试：屏幕亮且已解锁」—— 这是设计行为，不是故障。
+
+### 25.5 两个 Kotlin 陷阱（已规避）
+
+- **隐式接收者歧义**：`findViewById<Button>(...).apply { … setOnClickListener { getSystemService(…) } }`
+  里的 `getSystemService` 会命中 `View.getSystemService`（Button 是外层隐式接收者），
+  静默走错实现。全部改成显式 `this@PushService.xxx`。
+- **`inflate` 用的主题**：Service 上下文没有 AppCompat 主题。`activity_alarm.xml` 只用框架属性
+  （`android:*`）与自定义 drawable，不引用 `?attr/*`，因此普通 `LayoutInflater.from(service)` 可安全渲染。
+
+### 25.6 真机验证
+
+1. 装 v1.0.66+，设置页确认「悬浮窗权限：已开启」；
+2. **息屏**（不要亮屏，也不要解锁）触发 Test job；
+3. 预期：震动开始 → 最迟 2.5 秒后弹出全屏告警页并点亮屏幕；
+4. 设置页「上次强力提醒」应显示「成功：全屏告警页已弹出（悬浮窗通道）」。
+
+若这一条也失败，说明该 ROM 连 `TYPE_APPLICATION_OVERLAY` 盖锁屏都禁止
+（少数深度定制 ROM 如此）—— 那就只剩「震动 + 横幅」这一形态，
+而震动本来就不受这些限制，仍是最可靠的叫醒手段。
+

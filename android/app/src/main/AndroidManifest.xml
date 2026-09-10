@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 强力震动：普通权限，无需运行时申请 -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 点亮屏幕：悬浮窗告警页的 FLAG_TURN_SCREEN_ON 对非 Activity 窗口支持不一，
+         用带 ACQUIRE_CAUSES_WAKEUP 的唤醒锁兜底（普通权限） -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 锁屏全屏告警页：低于 IMPORTANCE_HIGH 的渠道上 FSI 完全不生效；
          Android 14 起非闹钟/通话类应用需检测 canUseFullScreenIntent()（设置页已做引导） -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />

@@ -22,9 +22,14 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
+import android.widget.Button
+import android.widget.TextView
 import com.example.notifyhub.LogHelper
+import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.ui.AlarmActivity
 import com.example.notifyhub.ui.KeysActivity
@@ -46,9 +51,13 @@ import java.util.concurrent.TimeUnit
 // Activity 根本不启动 —— 把震动绑在 Activity 生命周期上，恰好在最需要它的场景直接失效。
 // 震动在这里只是「马达直调」，不受锁屏/亮屏、静音模式、勿扰策略影响。
 //
-// 全屏告警页走两条并行通道：① 通知的 fullScreenIntent（请系统代为启动，由系统判定是否放行）；
-// ② 拿到悬浮窗权限后本服务自己把告警页拉起来（见 tryLaunchAlarmDirectly）。
-// 只留 ① 的话，ROM 的 BAL / 「后台弹出界面」闸门会让息屏场景退化成「只有横幅」。
+// 全屏告警页走三条通道，互不替代、哪条被系统放行就走哪条：
+//   ① 通知的 fullScreenIntent（请系统代为启动，由系统判定是否放行）
+//   ② 拿到悬浮窗权限后本服务直接启动告警页 Activity（见 tryLaunchAlarmDirectly）
+//   ③ ①② 都被拦时，直接把告警页画在一个全屏悬浮窗上（见 showAlarmOverlay）
+// ①② 都要「启动一个 Activity」，因此必然经过 Android 10+ 的后台启动限制（BAL）；
+// 国产 ROM 还额外叠了「后台弹出界面」开关。③ 由本进程调 WindowManager.addView 完成，
+// 不涉及 Activity 启动，是唯一不受这些闸门管辖的一条。
 class PushService : Service() {
 
     private val client = OkHttpClient.Builder()
@@ -77,6 +86,10 @@ class PushService : Service() {
     private var launchOverlay: View? = null
     // 直拉后的复核任务：判断这次到底有没有被系统放行
     private var pendingVerify: Runnable? = null
+
+    // ---------- 悬浮窗告警页（第三条通道）的状态 ----------
+    private var alarmOverlay: View? = null
+    private var overlayHide: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -146,8 +159,9 @@ class PushService : Service() {
         handler.removeCallbacksAndMessages(null)
         // 服务没了震动必须停：留着一个没人能取消的震动比不震更糟
         stopStrongVibrate()
-        // 悬浮窗也必须撤：服务被清掉后没人再来回收它
+        // 悬浮窗也必须撤：服务被清掉后没人再来回收它，会一直盖在屏幕上
         hideLaunchOverlay()
+        hideAlarmOverlay()
         stopReceiver?.let {
             try { unregisterReceiver(it) } catch (_: Exception) {}
         }
@@ -306,6 +320,9 @@ class PushService : Service() {
     // 通知的处置权在用户手上（点击会自行消失、滑掉已经没了）
     fun stopStrongVibrate() {
         handler.removeCallbacks(stopVibrateRunnable)
+        // 悬浮窗告警页与震动同生共死：四条停止入口（通知/滑掉/超时/按钮）都经过这里，
+        // 挂在这里就等于「只要震动停了，盖在屏幕上的那一层一定也收掉」。
+        hideAlarmOverlay()
         if (!vibrating) return
         vibrating = false
         runCatching { vibrator?.cancel() }
@@ -392,23 +409,24 @@ class PushService : Service() {
         )
 
         // 被 BAL 拦下时系统是**静默丢弃**（不抛异常、不回调），所以判断成败不能看返回值，
-        // 只能过一小会儿看 AlarmActivity 有没有真的 onCreate。结论落到 SharedPreferences，
-        // 设置页直接读出来 —— 用户不必抓日志就知道卡在哪一层。
+        // 只能过一小会儿看 AlarmActivity 有没有真的 onCreate。不过复核结果还多一个用途：
+        // **失败时立刻切到第三条通道**（悬浮窗直绘），用户不必自己去换开关试。
         pendingVerify?.let { handler.removeCallbacks(it) }
         val verify = Runnable {
             hideLaunchOverlay()
             val ok = alarmStartedAt >= t0
-            recordLaunchResult(
-                when {
-                    ok -> "成功：全屏告警页已弹出"
-                    !sent -> "失败：启动调用抛异常，详见诊断日志"
-                    else -> "失败：启动被系统拦截（只剩横幅）—— 多为厂商「后台弹出界面」未允许"
-                }
-            )
-            LogHelper.append(
-                this,
-                "direct launch verify id=$id -> ${if (ok) "alarm activity started" else "blocked by system"}"
-            )
+            if (ok) {
+                recordLaunchResult("成功：全屏告警页已弹出（Activity 通道）")
+                LogHelper.append(this, "direct launch verify id=$id -> alarm activity started")
+            } else {
+                // Activity 被系统拦下 → 换悬浮窗直绘。这条路不经过 Activity 启动，
+                // BAL 与 ROM 的「后台弹出界面」都管不到它。
+                LogHelper.append(
+                    this,
+                    "direct launch verify id=$id -> blocked (sent=$sent), fallback to alarm overlay"
+                )
+                showAlarmOverlay(title, body, notifId)
+            }
         }
         pendingVerify = verify
         handler.postDelayed(verify, LAUNCH_VERIFY_MS)
@@ -450,6 +468,108 @@ class PushService : Service() {
         val v = launchOverlay ?: return
         launchOverlay = null
         runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) }
+    }
+
+    // ---------- 第三条通道：悬浮窗直绘告警页 ----------
+    //
+    // 为什么需要它：①② 两条通道最终都要「启动一个 Activity」，而这必然经过 Android 10+ 的
+    // 后台启动限制（BAL）；国产 ROM 在此之上还叠了一道「后台弹出界面」开关（默认关闭，
+    // 位置在「应用信息」里而不是「特殊应用权限」）。一旦这道开关拦下，①② 会**同时**失效 ——
+    // 这正是「全屏通知已允许 + 悬浮窗已允许，息屏依然只出横幅」的原因。
+    //
+    // 悬浮窗是另一套机制：WindowManager.addView 由本进程直接完成，**不涉及 Activity 启动**，
+    // 因此不受 BAL 与「后台弹出界面」管辖，只需要悬浮窗权限。于是把告警页原样搬到一个
+    // TYPE_APPLICATION_OVERLAY 全屏窗口上即可 —— 布局复用 activity_alarm.xml，外观完全一致。
+    // FLAG_SHOW_WHEN_LOCKED 让它盖在锁屏之上，FLAG_TURN_SCREEN_ON 同时点亮屏幕。
+    private fun showAlarmOverlay(title: String, body: String, notifId: Int) {
+        handler.post {
+            if (!Settings.canDrawOverlays(this)) {
+                recordLaunchResult("失败：直拉被系统拦截，且未开启悬浮窗权限（只剩横幅）")
+                LogHelper.append(this, "alarm overlay skipped: no overlay permission")
+                return@post
+            }
+            hideAlarmOverlay()
+            try {
+                val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+                val v = LayoutInflater.from(this).inflate(R.layout.activity_alarm, null)
+                v.findViewById<TextView>(R.id.tvAlarmTitle).text = title
+                v.findViewById<TextView>(R.id.tvAlarmBody).text = body
+                v.findViewById<Button>(R.id.btnStop).apply {
+                    text = "关闭"
+                    // 全部显式写成 this@PushService：本块里 Button 也是一个隐式接收者，
+                    // 而 View 自带 getSystemService，不写限定符会静默落到 View 的实现上
+                    setOnClickListener {
+                        LogHelper.append(this@PushService, "alarm overlay: stop tapped")
+                        this@PushService.stopStrongVibrate()   // 内部会撤掉本悬浮窗
+                        if (notifId > 0) {
+                            runCatching {
+                                (this@PushService.getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                                    .cancel(notifId)
+                            }
+                        }
+                    }
+                }
+
+                val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else
+                    @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+
+                // 不加 FLAG_NOT_TOUCHABLE：按钮要能点。加 FLAG_NOT_FOCUSABLE 是为了不抢
+                // 输入焦点（按键仍归系统/锁屏），触摸事件照常投递到本窗口 —— 悬浮窗的标准做法。
+                @Suppress("DEPRECATION")
+                val flags = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+
+                val lp = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    type, flags, PixelFormat.TRANSLUCENT
+                ).apply { gravity = Gravity.TOP or Gravity.START }
+
+                wm.addView(v, lp)
+                alarmOverlay = v
+
+                // 与震动同一个时长：到点一起收，绝不出现「界面没了还在震」或反之
+                val hide = Runnable { hideAlarmOverlay() }
+                overlayHide = hide
+                handler.postDelayed(hide, VIBRATE_TIMEOUT_MS)
+
+                // FLAG_TURN_SCREEN_ON 对非 Activity 窗口的支持因 ROM 而异，补唤醒锁兜底
+                wakeScreenBriefly()
+
+                recordLaunchResult("成功：全屏告警页已弹出（悬浮窗通道）")
+                LogHelper.append(this, "alarm overlay shown notifId=$notifId")
+            } catch (e: Exception) {
+                recordLaunchResult("失败：悬浮窗告警页也未能显示（${e.javaClass.simpleName}）")
+                LogHelper.append(this, "alarm overlay failed: ${e.javaClass.simpleName}: ${e.message}")
+            }
+        }
+    }
+
+    private fun hideAlarmOverlay() {
+        overlayHide?.let { handler.removeCallbacks(it) }
+        overlayHide = null
+        val v = alarmOverlay ?: return
+        alarmOverlay = null
+        runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) }
+    }
+
+    // 点亮屏幕。FLAG_TURN_SCREEN_ON 是 Activity 窗口的正规做法，对 APPLICATION_OVERLAY
+    // 是否生效各家 ROM 不一，所以用带 ACQUIRE_CAUSES_WAKEUP 的唤醒锁兜底。
+    // 限时 10 秒自动释放：这是「把屏幕叫醒」而不是「让屏幕常亮」，
+    // 常亮由窗口上的 FLAG_KEEP_SCREEN_ON 负责（页面一收就跟着失效，不会漏电）。
+    private fun wakeScreenBriefly() {
+        runCatching {
+            @Suppress("DEPRECATION")
+            (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "notifyhub:alarm"
+            ).acquire(10_000L)
+        }
     }
 
     // 返回值只表示「调用有没有抛异常」，**不代表 Activity 真的起来了** ——
