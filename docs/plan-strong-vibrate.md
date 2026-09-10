@@ -1110,3 +1110,40 @@ NotificationChannel(PUSH_CHANNEL_ID_V2, "通知推送", NotificationManager.IMPO
 ## 17.5 仍未决
 
 规则四的强度：当前按方案默认**「按 Home / 电源 / Back 离开告警页不停震」**。若想改成「Back 即停」，在 `AlarmActivity` 加一个调用 `dismiss("back")` 的 `onBackPressed` 覆写即可（约 3 行）。
+
+---
+
+## 18. 上线记录（2026-09-10 执行完毕）
+
+### 18.1 执行顺序与结果
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| D1 迁移 | `wrangler d1 execute notify-hub --remote --file=./migrations/0008_strong_vibrate.sql --yes` | ✅ 成功；已回查 `pragma_table_info` 确认 `keys` / `jobs` 两列存在 |
+| worker 部署 | `wrangler deploy -c wrangler.toml` | ✅ Version `6d7a3cc3-62cc-47df-8733-d062a5185bc3`；自定义域名与 cron `* * * * *` 完好 |
+| 提交推送 | `git commit` → `git push` | ✅ `3f4d5b9`（22 文件，+1841 / −45） |
+| APK 构建 | GitHub Actions run `34479374182` | ✅ succeeded（2m20s）；产物 `notify-hub-v1.0.56-c56.apk`（4.1 MB，sha256 `ef0b0d5d…`）已发布到 `latest` Release |
+| pages 部署 | `npm run deploy:pages` | ✅ `https://a1867ef4.notify-hub-pages.pages.dev` |
+| 线上探活 | `GET /hook/<无效 key>` | ✅ HTTP 404 `{"error":"invalid key"}`（无副作用，仅验存活） |
+
+**Kotlin 编译验证**：此前唯一未验证项（本机无 Android SDK）已由 CI 补齐——构建通过，说明 `AlarmActivity` / `PushService` / 布局 / Manifest 均无编译错误。
+
+### 18.2 ⚠️ 执行中撞上的真实障碍：一个游离配置吃掉了 `wrangler deploy`
+
+`wrangler deploy` 连续三次以 **exit 137、零输出** 被杀，看起来像网络或权限问题，实则是配置发现问题：
+
+- **根因**：本机存在 `/Users/waxilo/Desktop/Code/wrangler.jsonc`——一个残留配置（`name:"ode"`、`compatibility_date:"2026-09-09"`、**`assets.directory:"CodeCliManager"`**，生成于 09-09 15:03，同批还留下 `~/Desktop/Code/.wrangler/`）。
+- **机制**：wrangler 会**向 CWD 的上级目录搜索配置文件，且优先采用 `.jsonc`**。于是从 `worker/` 执行时，`Code/` 下的这个 jsonc 压过了本项目的 `wrangler.toml`，wrangler 转而把整个 Tauri 项目 `CodeCliManager` 当作静态资源目录——扫到 63161 个文件、撞上 66 MB 的 `src-tauri/target/debug/.../dep-graph.bin`，报 "Asset too large" 后被 OOM 杀掉。
+- **定位过程**：`deploy --help` 正常 → `--dry-run` 同样被杀 → 把输出落盘到文件才拿到那行关键报错（管道/前台运行时空输出，因为进程被 SIGKILL 前缓冲未刷）。
+- **绕过**：`wrangler deploy -c wrangler.toml` 显式指定配置即可。**`wrangler pages deploy` 不支持 `-c`**（报 "Pages does not support custom paths for the Wrangler configuration file"），但其场景下 wrangler 只对该残留文件告警（"missing pages_build_output_dir … Ignoring configuration file for now"）并正常部署。
+- **⚠️ 仍需处理**：`worker/package.json` 的 `deploy` 脚本未带 `-c`，因此**该残留文件不清理，`npm run deploy` 依旧会失败**；它同样影响 `~/Desktop/Code/` 下的 CV、WiterDemo 等所有 wrangler 项目。建议删除或改名 `/Users/waxilo/Desktop/Code/wrangler.jsonc`（已把该陷阱记入项目与用户级记忆）。
+
+### 18.3 推送凭据
+
+`origin` URL 内嵌空 token（`https://x-access-token:@github.com/waxilo/notify-hub.git`），直接 `git push` 报 "Invalid username or token"。本次用 `gh auth token` 注入 URL 完成推送（`gh` 已登录账号 `waxilo`，含 `repo`/`workflow` 权限），**未改动任何 git 配置**。
+
+### 18.4 上线后待办
+
+1. **真机验收**（10.3 的 10 条清单），重点三条：滑掉通知是否停震、30 秒超时后横幅是否收回、新渠道「声音关 / 振动开」。
+2. **清理 `~/Desktop/Code/wrangler.jsonc`**（见 18.2）。
+3. 规则四强度仍为默认值（见 17.5）。
