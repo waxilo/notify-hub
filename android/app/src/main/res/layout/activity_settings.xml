@@ -44,11 +44,63 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content">
 
+            <!-- 卡片：提醒权限（强力震动的锁屏全屏依赖全屏通知权限） -->
+            <LinearLayout
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="18dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <TextView
+                    android:text="提醒权限"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_main"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/tvNotifStatus"
+                    android:text="通知权限：检查中…"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_muted"
+                    android:layout_marginTop="6dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/tvFsiStatus"
+                    android:text="全屏通知：检查中…"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_muted"
+                    android:layout_marginTop="4dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <Button
+                    android:id="@+id/btnFsiSetting"
+                    android:text="去开启全屏通知"
+                    android:visibility="gone"
+                    android:layout_marginTop="12dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:text="强力震动只依赖「通知权限」与后台存活，不受全屏通知权限影响：全屏通知未开启时，锁屏/灭屏只剩 60 秒横幅，但震动照常。"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_muted"
+                    android:layout_marginTop="8dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
             <!-- 卡片：版本与更新 -->
             <LinearLayout
                 android:orientation="vertical"
                 android:background="@drawable/bg_card"
                 android:padding="18dp"
+                android:layout_marginTop="12dp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">
 

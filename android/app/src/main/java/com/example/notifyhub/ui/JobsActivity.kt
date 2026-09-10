@@ -169,6 +169,7 @@ class JobsActivity : AppCompatActivity() {
         val etWeekly = v.findViewById<EditText>(R.id.etWeeklyTime)
         val etOnce = v.findViewById<EditText>(R.id.etOnceAt)
         val tvTzNote = v.findViewById<TextView>(R.id.tvTzNote)
+        val cbStrongVibrate = v.findViewById<CheckBox>(R.id.cbStrongVibrate)
         val cbEnabled = v.findViewById<CheckBox>(R.id.cbEnabled)
 
         val spinnerAdapter = { arr: Array<String> ->
@@ -195,6 +196,7 @@ class JobsActivity : AppCompatActivity() {
         spDow.setSelection(sc.dow)
         etWeekly.setText(sc.time)
         etOnce.setText(sc.at)
+        cbStrongVibrate.isChecked = job?.strongVibrate == 1
         cbEnabled.isChecked = job?.enabled != 0
         spKind.setSelection(kindIdx)
 
@@ -249,7 +251,8 @@ class JobsActivity : AppCompatActivity() {
                                     name = name, schedule = schedule,
                                     tz = tz,
                                     body = etBody.text.toString(),
-                                    enabled = cbEnabled.isChecked
+                                    enabled = cbEnabled.isChecked,
+                                    strongVibrate = cbStrongVibrate.isChecked
                                 )
                             )
                         }
@@ -261,7 +264,8 @@ class JobsActivity : AppCompatActivity() {
                                     name = name, schedule = schedule,
                                     tz = tz,
                                     body = etBody.text.toString(),
-                                    enabled = cbEnabled.isChecked
+                                    enabled = cbEnabled.isChecked,
+                                    strongVibrate = cbStrongVibrate.isChecked
                                 )
                             )
                         }

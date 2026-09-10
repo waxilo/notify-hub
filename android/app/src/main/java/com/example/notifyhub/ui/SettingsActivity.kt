@@ -1,7 +1,12 @@
 package com.example.notifyhub.ui
 
+import android.app.NotificationManager
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -11,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.ChangePwReq
+import com.example.notifyhub.data.PushService
 import com.example.notifyhub.data.TokenStore
 import com.example.notifyhub.data.UpdateChecker
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +33,10 @@ class SettingsActivity : AppCompatActivity() {
 
         // 底部页签：首页 / 定时任务 / 设置
         BottomNav.bind(this, SettingsActivity::class.java)
+
+        // ---- 提醒权限（强力震动相关的两项官方检测）----
+        findViewById<Button>(R.id.btnFsiSetting).setOnClickListener { openFullScreenIntentSetting() }
+        refreshPermissionState()
 
         // ---- 版本与更新 ----
         val tvVersion = findViewById<TextView>(R.id.tvVersion)
@@ -99,8 +109,53 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 从系统设置返回后刷新权限状态
+        refreshPermissionState()
         // "安装未知应用"授权后返回：自动继续安装
         com.example.notifyhub.data.UpdateChecker.resumePendingInstall(this)
+    }
+
+    // 两项官方检测：
+    //   ① 通知总开关 —— 关掉后我们**不会**震动（否则就是「我把通知关了它还在震」，必被投诉）
+    //   ② 全屏通知（Android 14+）—— 未授权时连锁屏都只剩 60 秒横幅；但震动不受影响
+    // 厂商自建的「后台弹出界面」权限不做反射探测（非官方 API，ROM 一升级就静默误判），
+    // 失效的探测比不探测更糟 —— 需要时按上面的提示文字手动前往即可。
+    private fun refreshPermissionState() {
+        val tvNotif = findViewById<TextView>(R.id.tvNotifStatus)
+        val tvFsi = findViewById<TextView>(R.id.tvFsiStatus)
+        val btnFsi = findViewById<Button>(R.id.btnFsiSetting)
+
+        val notifOk = runCatching {
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).areNotificationsEnabled()
+        }.getOrDefault(true)
+        tvNotif.text = if (notifOk) "通知权限：已开启" else "通知权限：已关闭 —— 通知与震动都不会触发，请前往系统设置开启"
+        tvNotif.setTextColor(if (notifOk) 0xFF17994F.toInt() else 0xFFE5484D.toInt())
+
+        if (Build.VERSION.SDK_INT < 34) {
+            // Android 14 以下 FSI 默认授予，无需检测
+            tvFsi.text = "全屏通知：已允许（Android 14 以下默认授予）"
+            tvFsi.setTextColor(0xFF17994F.toInt())
+            btnFsi.visibility = View.GONE
+        } else {
+            val fsiOk = PushService.canUseFullScreenIntent(this)
+            tvFsi.text = if (fsiOk) "全屏通知：已允许"
+            else "全屏通知：未允许 —— 锁屏/灭屏时不会弹出全屏告警页（震动照常持续）"
+            tvFsi.setTextColor(if (fsiOk) 0xFF17994F.toInt() else 0xFFC07F00.toInt())
+            btnFsi.visibility = if (fsiOk) View.GONE else View.VISIBLE
+        }
+    }
+
+    private fun openFullScreenIntentSetting() {
+        try {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
+                    .setData(Uri.fromParts("package", packageName, null))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            findViewById<TextView>(R.id.tvFsiStatus).text =
+                "无法打开系统设置，请手动前往：设置 → 应用 → 特殊应用权限 → 全屏通知"
+        }
     }
 
     private suspend fun checkUpdate(tvUpdate: TextView) {

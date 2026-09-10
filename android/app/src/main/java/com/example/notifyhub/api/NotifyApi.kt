@@ -22,7 +22,10 @@ data class UpdateKeyReq(
     val name: String? = null,
     val active: Boolean? = null,
     val mode: String? = null,
-    val template: String? = null
+    val template: String? = null,
+    // Gson 默认不序列化 null 字段 → 局部更新（如只改名称）不会把这个开关一起上报，
+    // 服务端「字段不传就不改」的策略才有意义
+    @SerializedName("strong_vibrate") val strongVibrate: Boolean? = null
 )
 data class KeyResp(val id: Long, val key: String, val name: String, val createdAt: Long)
 data class KeyItem(
@@ -34,7 +37,9 @@ data class KeyItem(
     @SerializedName("last_used") val lastUsed: Long?,
     val active: Int,
     val mode: String?,
-    val template: String?
+    val template: String?,
+    // 1 = 强力震动（无声、持续震到用户处理）；0 = 普通提醒（横幅 + 单次震动）
+    @SerializedName("strong_vibrate") val strongVibrate: Int?
 )
 data class KeysResp(val keys: List<KeyItem>)
 data class NotificationItem(
@@ -68,6 +73,8 @@ data class JobItem(
     @SerializedName("last_run_at") val lastRunAt: Long?,
     // 该任务已产生的日志条数（服务端聚合统计），用于列表展示
     @SerializedName("sent_count") val sentCount: Int?,
+    // 1 = 强力震动；0 = 普通提醒。与 key 的同名字段互相独立（任务与外部 key 是两条来源）
+    @SerializedName("strong_vibrate") val strongVibrate: Int?,
     // 服务端算好的中文描述，如「每 5 分钟」「每天 09:00（+08:00）」
     val desc: String?
 )
@@ -77,14 +84,16 @@ data class CreateJobReq(
     val schedule: String,
     val tz: String,
     val body: String = "",
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    @SerializedName("strong_vibrate") val strongVibrate: Boolean = false
 )
 data class UpdateJobReq(
     val name: String? = null,
     val schedule: String? = null,
     val tz: String? = null,
     val body: String? = null,
-    val enabled: Boolean? = null
+    val enabled: Boolean? = null,
+    @SerializedName("strong_vibrate") val strongVibrate: Boolean? = null
 )
 data class JobResp(val id: Long, @SerializedName("next_run_at") val nextRunAt: Long?, val desc: String?)
 

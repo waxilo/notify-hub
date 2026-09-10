@@ -5,12 +5,14 @@ import { json } from './utils.js';
 
 const DEDUP_WINDOW_MS = 300_000;   // 5 分钟防重窗口
 
-// opts: { userId, keyId, jobId, keyName, title, body, payload, dedupKey, dedup, rejected }
+// opts: { userId, keyId, jobId, keyName, title, body, payload, dedupKey, dedup, rejected, vibrate }
 //   jobId：定时任务触发时传入，用于把这条通知归到某个任务名下（可单独查历史 / 清空）。
 //          外部 webhook 写入时留空，那类通知记在 keyId 上。
 //   rejected：非空表示这次调用被服务端拒绝（如 key 已停用）。只留痕不推送 ——
 //            「被拒绝」本身不需要弹系统通知，但用户得能在历史里看到，否则就是黑洞。
 //   dedup=true 时按 dedupKey 在窗口内去重（job 用；webhook 仅当调用方显式传 key 时用）
+//   vibrate：端侧是否「持续震动到用户处理」。只走 WS 推送，**不落库** ——
+//            震动是端侧的提醒策略，不是消息事实；落库会让历史回放误触发震动。
 // 返回 { id, deduplicated?, empty?, rejected? }
 export async function deliver(env, opts) {
   const {
@@ -24,6 +26,7 @@ export async function deliver(env, opts) {
     dedupKey = '',
     dedup = false,
     rejected = null,
+    vibrate = false,
   } = opts;
 
   const dk = dedupKey ? String(dedupKey).slice(0, 128) : 'srv-' + crypto.randomUUID();
@@ -61,6 +64,7 @@ export async function deliver(env, opts) {
         key_name: keyName || '',
         title: t,
         body: b,
+        vibrate: !!vibrate,
         created_at: Date.now(),
       }),
     });

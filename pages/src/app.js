@@ -201,6 +201,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
         <tbody>
           <tr><td><code>message</code></td><td>通知内容（最长 8000 字符）</td></tr>
           <tr><td><code>dedup_key</code></td><td>可选。显式防重 key：5 分钟窗口内相同 key 只推送一次（用于调用方超时重试场景）。不传则服务端自动生成唯一 key，消息不做内容去重</td></tr>
+          <tr><td><code>vibrate</code></td><td>可选。<code>1</code> = 强力震动（无声持续震动，直到点击/滑掉通知，最长 30 秒）；<code>0</code> = 普通提醒。<b>不传则用该 key 在「Key 管理 → 编辑」里配置的默认值</b></td></tr>
         </tbody>
       </table>
       <p class="hint"><b>不需要传 title</b>：通知标题固定为 key 的名称，任何模式下都不会被请求参数覆盖。</p>
@@ -303,6 +304,7 @@ async function loadList() {
           <span class="key-name">${escapeHtml(k.name)}</span>
           <span class="badge ${k.active ? 'on' : 'off'}">${k.active ? '启用中' : '已停用'}</span>
           <span class="badge mode">${k.mode === 'custom' ? '自定义' : '默认'}</span>
+          ${k.strong_vibrate ? '<span class="badge mode">强震</span>' : ''}
           <code class="key-url">${escapeHtml(k.keyFull || k.key)}</code>
           <button class="key-more" data-more="${k.id}" aria-label="操作菜单">⋯</button>
         </div>
@@ -406,6 +408,8 @@ function openKeyEdit(k) {
           <input name="template" value="${escapeHtml(k.template || '')}" placeholder="如：$&#123;name&#125; 的年龄是 $&#123;age&#125; 岁" />
         </div>
         <label class="check-row"><input type="checkbox" name="active" ${k.active ? 'checked' : ''}/> 启用此 key（停用后 webhook 调用将被拒绝，不推送消息）</label>
+        <label class="check-row"><input type="checkbox" name="strong_vibrate" ${k.strong_vibrate ? 'checked' : ''}/> 强力震动（无声，持续震动到点击/滑掉通知，最长 30 秒）</label>
+        <p class="hint xs">开启后，App 收到该 key 的消息会无声持续震动，直到点击或滑掉通知（最长 30 秒）；未开启则是普通横幅 + 单次震动。调用方也可用 <code>?vibrate=1</code> / <code>?vibrate=0</code> 按次覆盖。</p>
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="edit-cancel">取消</button>
           <button type="submit" class="btn primary">保存</button>
@@ -429,6 +433,7 @@ function openKeyEdit(k) {
         active: F.active.checked,
         mode: F.mode.value,
         template: F.mode.value === 'custom' ? F.template.value : '',
+        strong_vibrate: F.strong_vibrate.checked,
       });
       root_.innerHTML = '';
       loadList();
@@ -511,6 +516,7 @@ async function loadJobs() {
           <span class="key-name">${escapeHtml(j.name || '未命名任务')}</span>
           <span class="badge ${j.enabled ? 'on' : 'off'}">${j.enabled ? '启用中' : '已停用'}</span>
           <span class="badge mode">${escapeHtml(j.desc || j.schedule)}</span>
+          ${j.strong_vibrate ? '<span class="badge mode">强震</span>' : ''}
         </div>
         <div class="key-sub">
           <span class="hint">通知内容：${escapeHtml(j.body || '（与任务名称相同）')}</span>
@@ -609,6 +615,9 @@ function openJobEdit(job) {
 
         <label>通知内容</label>
         <input name="body" value="${escapeHtml((job && job.body) || '')}" placeholder="留空则与任务名称相同" />
+
+        <label class="check-row" style="margin-top:10px"><input type="checkbox" name="strong_vibrate" ${job && job.strong_vibrate ? 'checked' : ''}/> 强力震动（无声，持续震动到点击/滑掉通知，最长 30 秒）</label>
+        <p class="hint xs" style="margin:4px 0 0">未开启时是普通横幅 + 单次震动。</p>
 
         <details class="adv" ${needAdv ? 'open' : ''}>
           <summary>高级设置（启停）</summary>
@@ -710,6 +719,7 @@ function openJobEdit(job) {
       schedule,
       tz,
       enabled: F.enabled.checked,
+      strong_vibrate: F.strong_vibrate.checked,
     };
     try {
       const r = isNew ? await api.createJob(payload) : await api.updateJob(job.id, payload);

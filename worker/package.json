@@ -23,7 +23,9 @@
     "migrate:notifidx:local": "wrangler d1 execute notify-hub --local --file=./migrations/0006_notifications_job_index.sql",
     "migrate:rejected": "wrangler d1 execute notify-hub --remote --file=./migrations/0007_notifications_rejected.sql",
     "migrate:rejected:local": "wrangler d1 execute notify-hub --local --file=./migrations/0007_notifications_rejected.sql",
-    "migrate:all": "npm run migrate && npm run migrate:sync && npm run migrate:jobs && npm run migrate:detach && npm run migrate:notifjob && npm run migrate:notifidx && npm run migrate:rejected"
+    "migrate:vibrate": "wrangler d1 execute notify-hub --remote --file=./migrations/0008_strong_vibrate.sql",
+    "migrate:vibrate:local": "wrangler d1 execute notify-hub --local --file=./migrations/0008_strong_vibrate.sql",
+    "migrate:all": "npm run migrate && npm run migrate:sync && npm run migrate:jobs && npm run migrate:detach && npm run migrate:notifjob && npm run migrate:notifidx && npm run migrate:rejected && npm run migrate:vibrate"
   },
   "devDependencies": {
     "wrangler": "^3.78.0"

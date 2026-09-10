@@ -66,6 +66,7 @@ async function fireJob(env, job, now) {
     payload: JSON.stringify({ source: 'job', job_id: job.id, scheduled_at: firedAt }),
     dedupKey: `job:${job.id}:${firedAt}`,
     dedup: true,
+    vibrate: !!job.strong_vibrate,
   });
 
   // 2) 再推进 job。顺序不能反：先推进再投递的话，投递失败这条触发就永久丢了。
@@ -171,9 +172,9 @@ export async function updateJob(request, env, userId, id) {
 
   // key_id 不参与更新（恒为 NULL）；title 列已废弃，不再写入
   await env.DB.prepare(
-    `UPDATE jobs SET name=?, schedule=?, tz=?, body=?, enabled=?, next_run_at=?, updated_at=?
+    `UPDATE jobs SET name=?, schedule=?, tz=?, body=?, enabled=?, strong_vibrate=?, next_run_at=?, updated_at=?
       WHERE id=? AND user_id=?`
-  ).bind(name, schedule, tz, body, enabled, next, now, id, userId).run();
+  ).bind(name, schedule, tz, body, enabled, strongVibrate, next, now, id, userId).run();
 
   return json({ ok: true, next_run_at: next, desc: describeSchedule(schedule, tz) });
 }

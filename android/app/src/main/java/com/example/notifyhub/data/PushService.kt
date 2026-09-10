@@ -5,13 +5,20 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import com.example.notifyhub.LogHelper
 import com.example.notifyhub.api.Api
+import com.example.notifyhub.ui.AlarmActivity
 import com.example.notifyhub.ui.KeysActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +32,11 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 // 前台服务：维持与 Worker 的 WebSocket 长连接，收到推送立即弹系统通知
+//
+// 强力震动（vibrate=true 的消息）在本服务内完成，**不放在 Activity**：
+// 全屏 Intent（FSI）只在锁屏/灭屏时真正拉起 Activity，解锁态下系统一律降级为横幅、
+// Activity 根本不启动 —— 把震动绑在 Activity 生命周期上，恰好在最需要它的场景直接失效。
+// 震动在这里只是「马达直调」，不受锁屏/亮屏、静音模式、勿扰策略影响。
 class PushService : Service() {
 
     private val client = OkHttpClient.Builder()
@@ -36,6 +48,17 @@ class PushService : Service() {
     private var authFailed = false          // token 无效（401）时停止重试，等重新登录后再启动
     private val recentKeys = HashMap<String, Long>()  // 防重缓存：key -> 首次收到时间戳
     private val handler = Handler(Looper.getMainLooper())
+
+    // ---------- 强力震动 ----------
+    private val vibrator: Vibrator? by lazy { resolveVibrator() }
+    private var vibrating = false
+    private var stopReceiver: BroadcastReceiver? = null
+    // 超时兜底：用户一直不处理时自动停，避免无限震动耗电 / 无法操作设备
+    private val stopVibrateRunnable = Runnable { onVibrateTimeout() }
+    // 超时后要把横幅收回通知栏，所以得记住这条通知的内容
+    private var strongMsgId = 0L
+    private var strongTitle: String? = null
+    private var strongBody: String = ""
 
     override fun onCreate() {
         super.onCreate()
@@ -58,10 +81,21 @@ class PushService : Service() {
             stopSelf()
             return
         }
+        registerStopReceiver()
         connect()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 「滑掉通知」的 deleteIntent 走 startService 送达（见 buildMessageNotification 的说明）
+        if (intent?.action == ACTION_STOP_VIBRATE) {
+            LogHelper.append(this, "PushService onStartCommand: stop vibrate")
+            stopStrongVibrate()
+            if (TokenStore(this).token.isNullOrBlank()) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            return START_STICKY
+        }
         LogHelper.append(this, "PushService onStartCommand")
         // 已退出登录：不重连，且返回 START_NOT_STICKY，阻止系统再次拉起（切断崩溃循环）
         if (TokenStore(this).token.isNullOrBlank()) {
@@ -82,6 +116,12 @@ class PushService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        // 服务没了震动必须停：留着一个没人能取消的震动比不震更糟
+        stopStrongVibrate()
+        stopReceiver?.let {
+            try { unregisterReceiver(it) } catch (_: Exception) {}
+        }
+        stopReceiver = null
         ws?.close(1000, "service destroyed")
         ws = null
         super.onDestroy()
@@ -126,11 +166,14 @@ class PushService : Service() {
                         val keyName = obj.optString("key_name")
                         val msgTitle = obj.optString("title")
                         val msgBody = obj.optString("body")
-                        showNotification(
-                            keyName.ifEmpty { msgTitle.ifEmpty { "新通知" } },
-                            msgBody,
-                            obj.optLong("id", 0L)
-                        )
+                        val msgId = obj.optLong("id", 0L)
+                        // 服务端按 key/job 的开关下发此字段（旧版服务端不会带，取默认 false →
+                        // 退化为普通提醒，两端可独立上线）
+                        val vibrate = obj.optBoolean("vibrate", false)
+                        val title = keyName.ifEmpty { msgTitle.ifEmpty { "新通知" } }
+                        showNotification(title, msgBody, msgId, vibrate)
+                        // 先弹通知再起震动：渠道自带的那一次短震也在这条路径里
+                        if (vibrate) startStrongVibrate(msgId, title, msgBody)
                     }
                 } catch (_: Exception) {
                 }
@@ -159,14 +202,126 @@ class PushService : Service() {
         handler.postDelayed({ connect() }, retry * 5_000L)
     }
 
+    // ---------- 强力震动：启动 / 停止 ----------
+
+    private fun resolveVibrator(): Vibrator? = runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        else @Suppress("DEPRECATION") getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+    }.getOrNull()
+
+    private fun registerStopReceiver() {
+        if (stopReceiver != null) return
+        val filter = IntentFilter(ACTION_STOP_VIBRATE)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, i: Intent?) {
+                LogHelper.append(this@PushService, "stop vibrate broadcast received")
+                stopStrongVibrate()
+            }
+        }
+        stopReceiver = receiver
+        try {
+            // 仅应用内广播：API 33+ 必须显式声明导出标志
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            else
+                registerReceiver(receiver, filter)
+        } catch (e: Exception) {
+            stopReceiver = null
+            LogHelper.append(this, "register stop receiver failed: ${e.message}")
+        }
+    }
+
+    private fun startStrongVibrate(id: Long, title: String, body: String) {
+        // 规则：用户已把本应用的通知关掉时不应震动 —— 否则就是「我把通知关了它还在震」，
+        // 这种体验被投诉是必然的。
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (!nm.areNotificationsEnabled()) {
+            LogHelper.append(this, "strong vibrate skipped: notifications disabled")
+            return
+        }
+        val v = vibrator
+        if (v == null || !v.hasVibrator()) {
+            LogHelper.append(this, "strong vibrate skipped: no vibrator")
+            return
+        }
+
+        strongMsgId = id
+        strongTitle = title
+        strongBody = body
+
+        // 连续多条消息到达：只刷新超时，不叠加震动（同一条马达没法叠加）
+        handler.removeCallbacks(stopVibrateRunnable)
+        if (!vibrating) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    // repeat=0 → 从 timings[0] 起无限循环，必须 cancel() 才停
+                    v.vibrate(VibrationEffect.createWaveform(VIBRATE_PATTERN, 0))
+                else
+                    @Suppress("DEPRECATION") v.vibrate(VIBRATE_PATTERN, 0)
+                vibrating = true
+                LogHelper.append(this, "strong vibrate start id=$id")
+            } catch (e: Exception) {
+                LogHelper.append(this, "strong vibrate failed: ${e.javaClass.simpleName}: ${e.message}")
+            }
+        }
+        handler.postDelayed(stopVibrateRunnable, VIBRATE_TIMEOUT_MS)
+    }
+
+    // 用户主动处理（点击通知 / 滑掉通知 / 告警页按钮）：只停震动，不动通知 ——
+    // 通知的处置权在用户手上（点击会自行消失、滑掉已经没了）
+    fun stopStrongVibrate() {
+        handler.removeCallbacks(stopVibrateRunnable)
+        if (!vibrating) return
+        vibrating = false
+        runCatching { vibrator?.cancel() }
+        LogHelper.append(this, "strong vibrate stop")
+    }
+
+    // 超时无人处理：停震 + 把横幅收回通知栏。
+    // 持 USE_FULL_SCREEN_INTENT 时解锁态那条横幅是 persistent，不会自己消失；
+    // 若只停震不管通知，用户回来会看到「横幅还挂着但已经没动静」，无从判断是否已处理。
+    private fun onVibrateTimeout() {
+        stopStrongVibrate()
+        retractHeadsUp()
+    }
+
+    private fun retractHeadsUp() {
+        val id = strongMsgId
+        val title = strongTitle
+        if (id <= 0 || title == null) return
+        try {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            // 同一 id 重发一条**不带 fullScreenIntent** 的通知：横幅收回通知栏，内容仍可回看。
+            // （若真机上横幅未被收回，退化为 nm.cancel(messageNotifId(id)) 即可。）
+            nm.notify(
+                messageNotifId(id),
+                buildMessageNotification(title, strongBody, id, withFullScreen = false, onlyAlertOnce = true)
+            )
+            LogHelper.append(this, "strong vibrate timeout -> heads-up retracted id=$id")
+        } catch (e: Exception) {
+            LogHelper.append(this, "retract heads-up failed: ${e.message}")
+        }
+    }
+
     // ---------- 通知 ----------
 
     private fun ensureChannel(): NotificationManager {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // 静音渠道：setSound(null, null) —— 要「无声只震」就必须换渠道 id，
+            // 因为渠道的声音属性创建后不可修改（旧 id 上已建过的渠道改不动）。
+            // 渠道自带震动保留并显式开启：普通消息天然就是「横幅 + 单次震动」，
+            // 开了强力震动的消息在此基础上再叠加服务层的循环震动，不需要第二套渠道。
+            // 不设 setVibrationPattern：保持系统默认单次波形，循环由 PushService 负责。
             nm.createNotificationChannel(
-                NotificationChannel(PUSH_CHANNEL_ID, "通知推送", NotificationManager.IMPORTANCE_HIGH)
+                NotificationChannel(PUSH_CHANNEL_ID, "通知推送", NotificationManager.IMPORTANCE_HIGH).apply {
+                    setSound(null, null)
+                    enableVibration(true)
+                }
             )
+            // 旧渠道已无任何通知投递，删除以免在系统设置里留下一个永远静不掉的喇叭
+            runCatching { nm.deleteNotificationChannel(LEGACY_PUSH_CHANNEL_ID) }
             // 前台服务必须展示一条通知（系统限制），降为最低优先级：
             // 无声音、无状态栏图标，折叠在通知栏最底部"后台运行"分组里
             nm.createNotificationChannel(
@@ -198,31 +353,11 @@ class PushService : Service() {
             .build()
     }
 
-    private fun showNotification(title: String, body: String, id: Long) {
+    private fun showNotification(title: String, body: String, id: Long, vibrate: Boolean) {
         val nm = ensureChannel()
-        val pi = PendingIntent.getActivity(
-            this, id.toInt().coerceAtLeast(1),
-            Intent(this, KeysActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            Notification.Builder(this, PUSH_CHANNEL_ID)
-        else
-            @Suppress("DEPRECATION") Notification.Builder(this)
-        val n = b
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(Notification.BigTextStyle().bigText(body))
-            .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentIntent(pi)
-            .setCategory(Notification.CATEGORY_MESSAGE)
-            .setOngoing(false)
-            .setAutoCancel(true)
-            .build()
         // 通知 id 使用独立高位段，绝不与前台服务通知 id（1001）冲突：
         // 一旦消息 id 撞上 FGS 通知 id，该通知会被系统按前台服务通知对待（一键清除无法移除）
-        nm.notify(messageNotifId(id), n)
+        nm.notify(messageNotifId(id), buildMessageNotification(title, body, id, withFullScreen = vibrate))
         // 已触达回调：通知成功弹出到系统通知栏后，上报 Worker 修正该消息的触达状态
         if (id > 0) {
             CoroutineScope(Dispatchers.IO).launch {
@@ -231,10 +366,83 @@ class PushService : Service() {
         }
     }
 
+    // withFullScreen=true 时挂 fullScreenIntent → 锁屏/灭屏拉起 AlarmActivity；
+    // 解锁态系统一定降级为「关不掉的横幅」（持 USE_FULL_SCREEN_INTENT 时）。
+    private fun buildMessageNotification(
+        title: String,
+        body: String,
+        id: Long,
+        withFullScreen: Boolean,
+        onlyAlertOnce: Boolean = false,
+    ): Notification {
+        val rc = messageNotifId(id)
+        // 点击通知：带 extra 打开 App（KeysActivity 收到后发停止广播）。
+        // 用 extra 而不是「onResume 无条件停」，是为了精确区分「点击通知」与「从桌面图标进 App」。
+        val contentPi = PendingIntent.getActivity(
+            this, rc,
+            Intent(this, KeysActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_STOP_VIBRATE, true),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            Notification.Builder(this, PUSH_CHANNEL_ID)
+        else
+            @Suppress("DEPRECATION") Notification.Builder(this)
+        b.setContentTitle(title)
+            .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentIntent(contentPi)
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            // 绝不 setOngoing(true)：ongoing 通知在锁屏设备上无法被用户划掉，
+            // 会直接破坏「滑掉通知即停止震动」这条路径。
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(onlyAlertOnce)
+
+        if (withFullScreen) {
+            val fsPi = PendingIntent.getActivity(
+                this, rc,
+                Intent(this, AlarmActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(AlarmActivity.EXTRA_TITLE, title)
+                    .putExtra(AlarmActivity.EXTRA_BODY, body),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            b.setFullScreenIntent(fsPi, true)
+            // 滑掉通知 = 停止震动。只给强震通知挂：否则滑掉一条普通通知会误停
+            // 另一条消息正在进行的震动。
+            // 这里刻意用 getService 而不是 getBroadcast：系统代为发出 PendingIntent 时，
+            // 「动态注册的接收器 + 导出标志」是否放行存在版本差异，走 startService 没有这层歧义，
+            // 由 onStartCommand 识别 ACTION_STOP_VIBRATE 处理。
+            b.setDeleteIntent(
+                PendingIntent.getService(
+                    this, rc,
+                    Intent(this, PushService::class.java).setAction(ACTION_STOP_VIBRATE),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            )
+        }
+        return b.build()
+    }
+
     companion object {
-        private const val PUSH_CHANNEL_ID = "notify_hub_push"
+        // v2：旧渠道 notify_hub_push 是「有声音」的，而渠道声音属性创建后不可修改，
+        // 要做到无声只能换 id（旧渠道在 ensureChannel 里删除）
+        private const val PUSH_CHANNEL_ID = "notify_hub_push_v2"
+        private const val LEGACY_PUSH_CHANNEL_ID = "notify_hub_push"
         const val FG_CHANNEL_ID = "notify_hub_foreground"
         const val FOREGROUND_ID = 1001
+
+        // 震动停止指令：点击通知 / 滑掉通知 / 告警页按钮 / 超时关闭 都走这一条广播
+        const val ACTION_STOP_VIBRATE = "com.example.notifyhub.STOP_VIBRATE"
+        // 只有「点击通知进入 App」才带这个 extra，桌面图标/最近任务进入不会误停
+        const val EXTRA_STOP_VIBRATE = "stop_vibrate"
+
+        private val VIBRATE_PATTERN = longArrayOf(0L, 700L, 500L)  // 震 700ms → 停 500ms，循环
+        private const val VIBRATE_TIMEOUT_MS = 30_000L             // 30 秒兜底自动停
+
         private const val MESSAGE_ID_BASE = 1_000_000  // 消息通知 id 段起点，避开 FGS 通知 id
         private const val DEDUP_WINDOW_MS = 3000L  // 防重缓存窗口：3 秒内同 key 只弹一次
 
@@ -242,5 +450,13 @@ class PushService : Service() {
         // id 高位段映射，保证与前台服务通知 id 不冲突
         fun messageNotifId(id: Long): Int =
             (MESSAGE_ID_BASE + (id % MESSAGE_ID_BASE)).toInt().coerceAtLeast(1)
+
+        // 全屏通知权限检测（Android 14+）：权限丢失后连锁屏都只剩 60 秒横幅，
+        // 所以设置页要能把用户引导到系统开关。
+        fun canUseFullScreenIntent(ctx: Context): Boolean =
+            if (Build.VERSION.SDK_INT < 34) true
+            else runCatching {
+                (ctx.getSystemService(NOTIFICATION_SERVICE) as NotificationManager).canUseFullScreenIntent()
+            }.getOrDefault(true)
     }
 }

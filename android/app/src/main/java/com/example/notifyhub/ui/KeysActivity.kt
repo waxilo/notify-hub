@@ -22,6 +22,7 @@ import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.KeyItem
 import com.example.notifyhub.api.UpdateKeyReq
+import com.example.notifyhub.data.PushService
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -40,6 +41,9 @@ class KeysActivity : AppCompatActivity() {
         setContentView(R.layout.activity_keys)
 
         LogHelper.append(this, "KeysActivity onCreate")
+
+        // 点击强震通知进入：停掉震动（桌面图标/最近任务进入不带这个 extra，不会误停）
+        handleStopVibrate(intent)
 
         // 收件箱移除后由首页负责拉起前台推送服务，保证 WS 实时推送在线
         // 无登录态时不拉起（退出登录后残留任务栈可能再次进入本页）
@@ -76,6 +80,22 @@ class KeysActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         loadKeys()  // 从编辑/收件箱返回后刷新状态
+    }
+
+    // 已有实例时点通知会走这里（FLAG_ACTIVITY_CLEAR_TOP + 单实例栈），不能只靠 onCreate
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleStopVibrate(intent)
+    }
+
+    // 只有「点击通知进入」才停震动。用 extra 而不是「onResume 即停」，
+    // 是为了不误伤「从桌面图标 / 最近任务打开 App」这条正常路径。
+    private fun handleStopVibrate(i: Intent?) {
+        if (i?.getBooleanExtra(PushService.EXTRA_STOP_VIBRATE, false) != true) return
+        i.removeExtra(PushService.EXTRA_STOP_VIBRATE)
+        sendBroadcast(Intent(PushService.ACTION_STOP_VIBRATE).setPackage(packageName))
+        LogHelper.append(this, "stop vibrate requested from notification tap")
     }
 
     private fun loadKeys() {
@@ -152,12 +172,14 @@ class KeysActivity : AppCompatActivity() {
         val etName = view.findViewById<EditText>(R.id.etName)
         val rbDefault = view.findViewById<RadioButton>(R.id.rbModeDefault)
         val rbCustom = view.findViewById<RadioButton>(R.id.rbModeCustom)
+        val cbStrongVibrate = view.findViewById<CheckBox>(R.id.cbStrongVibrate)
         val cbActive = view.findViewById<CheckBox>(R.id.cbActive)
         val tplFields = view.findViewById<View>(R.id.tplFields)
         val etTemplate = view.findViewById<EditText>(R.id.etTemplate)
 
         etName.setText(k.name)
         if (k.mode == "custom") rbCustom.isChecked = true else rbDefault.isChecked = true
+        cbStrongVibrate.isChecked = k.strongVibrate == 1
         cbActive.isChecked = k.active == 1
         etTemplate.setText(k.template ?: "")
         val syncTpl = { tplFields.visibility = if (rbCustom.isChecked) View.VISIBLE else View.GONE }
@@ -187,7 +209,8 @@ class KeysActivity : AppCompatActivity() {
                                 name = name,
                                 active = cbActive.isChecked,
                                 mode = if (rbCustom.isChecked) "custom" else "default",
-                                template = if (rbCustom.isChecked) etTemplate.text.toString().trim() else ""
+                                template = if (rbCustom.isChecked) etTemplate.text.toString().trim() else "",
+                                strongVibrate = cbStrongVibrate.isChecked
                             )
                         )
                     }

@@ -154,6 +154,14 @@
             android:layout_height="wrap_content" />
 
         <CheckBox
+            android:id="@+id/cbStrongVibrate"
+            android:text="强力震动（无声，持续震动到点击/滑掉通知，最长 30 秒）"
+            android:textSize="14sp"
+            android:layout_marginTop="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <CheckBox
             android:id="@+id/cbEnabled"
             android:text="启用此任务"
             android:textSize="14sp"

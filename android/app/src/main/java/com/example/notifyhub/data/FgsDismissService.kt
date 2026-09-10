@@ -9,7 +9,7 @@ import android.service.notification.StatusBarNotification
 // 隐藏前台服务的常驻通知：
 // 持有"通知使用权"后，监听到自己的前台服务通知（后台连接渠道）立即取消，
 // 服务本身继续以前台状态运行，WebSocket 保活不受影响。
-// 消息通知（notify_hub_push 渠道）不受影响，正常展示。
+// 消息通知（notify_hub_push_v2 渠道）不受影响，正常展示。
 //
 // 加固：onListenerConnected 时通知快照可能尚未同步（尤其刚授权后），
 // 用递增间隔多次重查；系统刷新前台服务重新贴出的通知由 onNotificationPosted 兜住。

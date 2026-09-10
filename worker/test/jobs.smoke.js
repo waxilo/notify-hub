@@ -8,20 +8,22 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { runDueJobs, deleteJob, listJobs } from '../src/jobs.js';
 import { clearNotifications } from '../src/notifications.js';
-import { deleteKey } from '../src/keys.js';
+import { deleteKey, updateKey } from '../src/keys.js';
 import { handleWebhook } from '../src/webhook.js';
 
 const db = new DatabaseSync(':memory:');
 db.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
 // 按真实部署顺序跑迁移：0002 补列（内存库是全新的，ALTER 可直接执行）+ 0003 建 jobs 表
-// + 0004 清空 jobs.key_id + 0005 给 notifications 补 job_id + 0006 建索引 + 0007 补 rejected。
-// 注意线上已有库不能跑 0002 / 0005 / 0007（列已存在会整批回滚），只能跑幂等的 0003 / 0004 / 0006。
+// + 0004 清空 jobs.key_id + 0005 给 notifications 补 job_id + 0006 建索引 + 0007 补 rejected
+// + 0008 给 keys/jobs 补 strong_vibrate。
+// 注意线上已有库不能跑 0002 / 0005 / 0007 / 0008（列已存在会整批回滚），只能跑幂等的 0003 / 0004 / 0006。
 db.exec(readFileSync(new URL('../migrations/0002_schema_sync.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0003_jobs.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0004_jobs_detach_key.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0005_notifications_job_id.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0006_notifications_job_index.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0007_notifications_rejected.sql', import.meta.url), 'utf8'));
+db.exec(readFileSync(new URL('../migrations/0008_strong_vibrate.sql', import.meta.url), 'utf8'));
 
 // ---- 极简 D1 适配层 ----
 const stmt = (sql) => {
@@ -247,6 +249,62 @@ hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURICom
 ck('启用后调用恢复正常', hr.status === 201, 'status=' + hr.status);
 ck('启用后正常推送', pushes.length === pushBefore2 + 1, 'pushes=' + (pushes.length - pushBefore2));
 ck('启用后写入的是正常记录', db.prepare('SELECT rejected FROM notifications WHERE key_id=3 ORDER BY id DESC LIMIT 1').get().rejected === null);
+
+/* ---------------- 强力震动开关（strong_vibrate） ---------------- */
+
+// 16) key 默认值 → webhook 按次覆盖 → WS payload 的 vibrate 字段
+// 震动不落库：写库的 notifications 行里没有这一列，只有推送给 App 的 payload 带
+db.prepare('INSERT INTO keys (id, user_id, key, name, created_at, active, mode, strong_vibrate) VALUES (4,1,?,?,?,1,?,1)')
+  .run('k4', '强震通道', now, 'default');
+db.prepare('INSERT INTO keys (id, user_id, key, name, created_at, active, mode, strong_vibrate) VALUES (5,1,?,?,?,1,?,0)')
+  .run('k5', '普通通道', now, 'default');
+const lastPush = () => pushes[pushes.length - 1];
+
+await handleWebhook(new Request('https://x/hook/k5?message=a', { method: 'GET' }), env, 'k5');
+ck('普通 key 推送 vibrate=false', lastPush().vibrate === false, 'v=' + lastPush().vibrate);
+
+await handleWebhook(new Request('https://x/hook/k5?message=b&vibrate=1', { method: 'GET' }), env, 'k5');
+ck('?vibrate=1 按次覆盖为 true', lastPush().vibrate === true, 'v=' + lastPush().vibrate);
+
+await handleWebhook(new Request('https://x/hook/k4?message=c', { method: 'GET' }), env, 'k4');
+ck('强震 key 默认推送 vibrate=true', lastPush().vibrate === true, 'v=' + lastPush().vibrate);
+
+await handleWebhook(new Request('https://x/hook/k4?message=d&vibrate=0', { method: 'GET' }), env, 'k4');
+ck('?vibrate=0 按次覆盖为 false', lastPush().vibrate === false, 'v=' + lastPush().vibrate);
+
+await handleWebhook(new Request('https://x/hook/k5', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ message: 'e', vibrate: 1 }),
+}), env, 'k5');
+ck('POST body 的 vibrate 字段生效', lastPush().vibrate === true, 'v=' + lastPush().vibrate);
+
+// 17) 定时任务透传：job.strong_vibrate → WS payload
+// 同一次 tick 可能触发多个任务，所以按「该任务的 notification id」去找对应那条推送，不依赖顺序
+const pushForJob = (jobId) => {
+  const row = db.prepare('SELECT id FROM notifications WHERE job_id=? ORDER BY id DESC LIMIT 1').get(jobId);
+  return row ? pushes.find((p) => p.id === row.id) : undefined;
+};
+const jobIdV = insertJob('every:5m', now - 1000, 1, '强震任务');
+db.prepare('UPDATE jobs SET strong_vibrate=1 WHERE id=?').run(jobIdV);
+await runDueJobs(env, now);
+ck('定时任务强震透传到推送', pushForJob(jobIdV)?.vibrate === true, JSON.stringify(pushForJob(jobIdV) || {}));
+
+const jobIdN = insertJob('every:5m', now - 1000, 1, '普通任务');
+await runDueJobs(env, now);
+ck('定时任务未开强震时为 false', pushForJob(jobIdN)?.vibrate === false, JSON.stringify(pushForJob(jobIdN) || {}));
+
+// 18) keys.js 的 updateKey：能写开关，且「不传就不改」（旧版客户端局部更新不会误清）
+await updateKey(new Request('https://x/api/keys/5', {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ strong_vibrate: true }),
+}), env, 1, 5);
+ck('updateKey 可打开强震开关', db.prepare('SELECT strong_vibrate FROM keys WHERE id=5').get().strong_vibrate === 1);
+
+await updateKey(new Request('https://x/api/keys/5', {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: '改个名' }),
+}), env, 1, 5);
+ck('updateKey 不传开关时保留原值', db.prepare('SELECT strong_vibrate FROM keys WHERE id=5').get().strong_vibrate === 1);
 
 console.log(bad ? '\n' + bad + ' FAILED' : '\nALL PASS');
 process.exit(bad ? 1 : 0);
