@@ -1147,3 +1147,42 @@ NotificationChannel(PUSH_CHANNEL_ID_V2, "通知推送", NotificationManager.IMPO
 1. **真机验收**（10.3 的 10 条清单），重点三条：滑掉通知是否停震、30 秒超时后横幅是否收回、新渠道「声音关 / 振动开」。
 2. **清理 `~/Desktop/Code/wrangler.jsonc`**（见 18.2）。
 3. 规则四强度仍为默认值（见 17.5）。
+
+---
+
+## 19. 上线后抢修：`PUT /api/jobs/:id` 返回 500
+
+### 19.1 现象与根因
+
+上线约 6 分钟后，编辑定时任务（`PUT /api/jobs/8`）返回 **500**。
+
+根因是**本次实现引入的**：`worker/src/jobs.js` 的 `updateJob` 中，SQL 已加 `strong_vibrate=?` 占位符、`bind()` 也已加 `strongVibrate`，**但变量声明那一行在早前「并行编辑同一文件发生竞争、部分改动未落盘」时丢失**——于是每次编辑任务都抛 `ReferenceError: strongVibrate is not defined`。
+
+顺带查出第二处漏改：`createJob` 的 INSERT **整列都没带 `strong_vibrate`**，新建任务时该开关被静默丢弃（默认 0）。
+
+### 19.2 为什么测试没拦住（这才是真正要记的）
+
+| 缺口 | 说明 |
+|---|---|
+| 写入路径完全未覆盖 | `jobs.smoke.js` 只 import 了 `deleteJob` / `listJobs`；`createJob` / `updateJob` **一次都没被调用过**。它测的是 `fireJob` *读取* `strong_vibrate`，而写入路径从未被执行。 |
+| 内存 D1 适配层过于宽容 | 适配层的 `bind()` 把 `undefined` 原样交给 `node:sqlite` 而不报错；**真实 D1 会抛 `D1_TYPE_ERROR`**。这个「静默吞掉 undefined」的行为恰好是 bug 逃逸的通道，也是它与生产环境最危险的一处偏离。 |
+
+### 19.3 修复
+
+| 文件 | 改动 |
+|---|---|
+| `worker/src/jobs.js` | ① `updateJob` 补上 `const strongVibrate = b.strong_vibrate !== undefined ? (b.strong_vibrate ? 1 : 0) : job.strong_vibrate;`（沿用 `updateKey` 的「字段不传就不改」，旧客户端局部更新不会误清开关）。② `createJob` 的 INSERT 补上 `strong_vibrate` 列与对应 bind。 |
+| `worker/test/jobs.smoke.js` | ① 新增 5 条断言覆盖 createJob / updateJob 的写入路径，**payload 直接采用用户报错时的那一条**（`daily:21:01` + `+08:00` + `strong_vibrate:true`）。② 适配层 `bind()` 改为对 `undefined` 抛错，对齐真实 D1 的 `D1_TYPE_ERROR`——让同类错误在本地就暴露。 |
+
+### 19.4 验证与上线
+
+- `npm test`：**全绿，76 条通过 / 0 失败**（含新增 5 条）。
+- worker 重新部署：Version `0d7f8ab0-faa7-48b4-a2a0-beab78910fe9`。
+- 数据侧确认：`SELECT id,name,schedule,strong_vibrate FROM jobs WHERE id=8` → `strong_vibrate = 0`，**证明那次 500 确实没有写入**，用户重试即可生效。
+- 提交 `229933f` 已推送（与 `75a34a0` 文档提交一并，经直连绕过不稳定的代理）。
+
+### 19.5 教训
+
+1. **「并行编辑同一文件」这条约定已经造成一次线上事故**——它丢掉的不是格式，而是一行变量声明。凡涉及同一文件的多次改动，一律串行。
+2. **测试替身必须比生产更严格，而不是更宽容**。内存 D1 适配层缺的那一个 `undefined` 校验，直接换来了 6 分钟的线上 500。
+3. **新增列时，INSERT / UPDATE / 读取三处都要逐一核对**，只改其中两处会在最不容易被测试覆盖的地方留下缺口。
