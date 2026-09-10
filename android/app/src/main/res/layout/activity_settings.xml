@@ -86,6 +86,26 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
 
+                <!-- 悬浮窗权限：Android 10+ 后台启动 Activity 的硬豁免。
+                     系统闹钟等预装应用天然在白名单里，第三方应用没有 —— 这是「闹钟能全屏、
+                     我们只剩横幅」的直接原因，也是本页最该开的一项。 -->
+                <TextView
+                    android:id="@+id/tvOverlayStatus"
+                    android:text="悬浮窗权限：检查中…"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_muted"
+                    android:layout_marginTop="6dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <Button
+                    android:id="@+id/btnOverlaySetting"
+                    android:text="去开启悬浮窗权限"
+                    android:visibility="gone"
+                    android:layout_marginTop="12dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
                 <!-- 推送渠道重要性：FSI 的硬门槛，且一旦被用户调低 App 再也改不回来 -->
                 <TextView
                     android:id="@+id/tvChannelStatus"
@@ -105,7 +125,7 @@
                     android:layout_height="wrap_content" />
 
                 <TextView
-                    android:text="锁屏全屏告警页需要三个条件同时成立：① 以上两项权限已开启；② 推送渠道重要性为「高」（低于「高」时系统不会弹出全屏页，且该设置被改动后 App 无法自行恢复）；③ 设备处于锁屏/息屏状态。Android 13 起，只要系统判定「用户正在使用设备」，就一律只给横幅、不弹全屏页 —— 此时震动照常持续，点击横幅可直接进入告警页。"
+                    android:text="全屏告警页走两条并行通道，任一条通即可：① 系统全屏通知（上面三项状态）；② 悬浮窗权限 —— Android 10 起，后台启动界面受系统限制，系统闹钟等预装应用在白名单里、第三方应用没有，这是「闹钟能全屏而本应用只剩横幅」的直接原因；开启悬浮窗后本应用可自行把告警页拉到锁屏之上，不再受该限制。\n\n若两项都已开启仍只有横幅，请再到系统「应用信息」里允许「后台弹出界面」（小米/华为等机型的独立开关，默认关闭，且会同时废掉上面两条通道），并确认设备处于息屏或锁屏状态：亮屏使用中时系统一律只给横幅，此时点横幅即可进入告警页。"
                     android:textSize="12sp"
                     android:textColor="@color/text_muted"
                     android:layout_marginTop="8dp"

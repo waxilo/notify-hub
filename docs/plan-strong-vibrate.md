@@ -1250,3 +1250,43 @@ App 诊断日志写在 `下载/NotifyHub/notify-hub.log`。收到一条强震消
 - `AlarmActivity.kt`：删除对应 `setOnClickListener`（原先跳 `KeysActivity` 且不停震）。
 
 **未受影响的路径**：告警页仍只有「停止震动」一个按钮，其余停止入口（通知上的快捷停止、滑掉通知、30 秒超时）不变；用户仍可通过通知栏/桌面图标自行进入 App 查看详情 —— 只是不再由告警页代劳。
+
+## 22. 告警页精简 + 息屏全屏的真正解法（2026-09-10）
+
+### 22.1 告警页只留三样东西
+
+`activity_alarm.xml` / `AlarmActivity.kt`：删掉「强力提醒」标签、震动状态行（含倒计时）、底部提示语与「查看详情」按钮，页面上只剩**标题 + 正文 + 一个按钮**。
+
+- 理由：这一页被拉起的场景是「息屏/锁屏下的强力提醒」，用户要做的唯一决定是「让它继续响还是停」。任何附加信息都在稀释这个决定。
+- 连带删除：`AlarmActivity` 里的 `tick` 倒计时 `Runnable` 与 `deadline` 字段（`tvAlarmStatus` 已不存在，留着会 NPE）。**30 秒自动关闭行为保留**，只是不再显示倒计时。
+- 按钮文案仍随状态变化：震动中显示「停止震动」，已停显示「关闭」。
+
+### 22.2 「系统闹钟能全屏，本应用只剩横幅」—— 根因不在 FSI 本身
+
+真机现象：通知权限、全屏通知、渠道重要性三项全绿，息屏依然只有横幅；而系统闹钟一切正常。
+
+根因是 **FSI 之外还有一道更外面的闸门：Android 10 起的「后台启动 Activity 限制」（BAL）**。`setFullScreenIntent()` 的语义是「请系统代为启动 Activity」，系统在代为启动前，仍要判断发起方是否被允许从后台启动 Activity。官方给的豁免清单里，与系统闹钟/通话相关的是**预装应用的默认白名单**；第三方应用不在其中。国产 ROM（小米/华为等）还额外加了一个「后台弹出界面」开关，**默认关闭，且一旦关闭会把上述所有通道一并废掉** —— 系统时钟应用天然在白名单里，所以它能全屏，我们不行。这也解释了为什么权限检查全绿却毫无作用：那些检查都对，只是闸门在更外面。
+
+### 22.3 解法：SYSTEM_ALERT_WINDOW 是 BAL 的硬豁免
+
+官方豁免清单中，**「应用已获得 SYSTEM_ALERT_WINDOW 权限」是普通应用能自己争取到的那一条**（其余多是系统组件或设备所有者）。拿到「显示在其他应用上层」后，应用可以从后台启动自己的 Activity，**锁屏下同样生效**。
+
+据此新增第二条并行通道：
+
+| | 通道 ①  | 通道 ②（新增） |
+|---|---|---|
+| 机制 | 通知 `fullScreenIntent`，请系统代为启动 | 服务直接 `startActivity`，自己启动 |
+| 前提 | 全屏通知权限 + 渠道 ≥ HIGH + 系统/ROM 放行 | **悬浮窗权限** |
+| 受影响面 | 被 BAL / ROM「后台弹出界面」拦截 | 只要能拿到悬浮窗权限即可 |
+
+实现要点：
+
+1. `AndroidManifest.xml` 增加 `SYSTEM_ALERT_WINDOW`（特殊权限，只能跳系统页手动开，无运行时弹窗）。
+2. `PushService.tryLaunchAlarmDirectly()`：仅当 `Settings.canDrawOverlays()` 为真、**且设备处于息屏或锁屏时**才直接拉起 `AlarmActivity`，并带 `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_REORDER_TO_FRONT`。
+   - 场景闸门与 AOSP 的 FSI 判定保持一致（息屏/锁屏 → 全屏；亮屏使用中 → 只给横幅），避免抢占用户手上正在做的事。
+   - 未获权限时 `startActivity` 被系统**静默拦截**（不抛异常、不崩溃），因此无需额外防护。
+   - 与 FSI **并行而非二选一**：放行哪条走哪条；两条都到也无害 —— `AlarmActivity` 是 `singleInstance`，只会有一个实例，第二次进入走 `onNewIntent`。
+3. 设置页新增「悬浮窗权限」状态行与跳转按钮（`ACTION_MANAGE_OVERLAY_PERMISSION`，带 package 的入口个别 ROM 不认，已退到权限列表页），并在卡片底部补上「后台弹出界面」的文字引导（非官方 API，**不做反射探测** —— 失效的探测比不探测更糟）。
+4. `logFsiFacts()` 增加 `overlayPerm=` 一项。新的自证方式：`strong vibrate start` 之后若既无 `AlarmActivity onCreate` 也无 `direct launch alarm activity`，才说明两条通道都被拦了。
+
+**验证顺序**（真机）：设置页 → 开启悬浮窗权限 → 息屏触发 Test job → 观察是否直接弹出全屏告警页；对照日志确认走的是 `direct launch alarm activity` 还是 FSI。

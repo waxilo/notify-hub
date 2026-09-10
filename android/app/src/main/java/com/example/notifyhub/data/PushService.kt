@@ -1,5 +1,6 @@
 package com.example.notifyhub.data
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -13,9 +14,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
 import com.example.notifyhub.LogHelper
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.ui.AlarmActivity
@@ -37,6 +40,10 @@ import java.util.concurrent.TimeUnit
 // 全屏 Intent（FSI）只在锁屏/灭屏时真正拉起 Activity，解锁态下系统一律降级为横幅、
 // Activity 根本不启动 —— 把震动绑在 Activity 生命周期上，恰好在最需要它的场景直接失效。
 // 震动在这里只是「马达直调」，不受锁屏/亮屏、静音模式、勿扰策略影响。
+//
+// 全屏告警页走两条并行通道：① 通知的 fullScreenIntent（请系统代为启动，由系统判定是否放行）；
+// ② 拿到悬浮窗权限后本服务直接 startActivity（见 tryLaunchAlarmDirectly）。
+// 只留 ① 的话，ROM 的 BAL / 「后台弹出界面」闸门会让息屏场景退化成「只有横幅」。
 class PushService : Service() {
 
     private val client = OkHttpClient.Builder()
@@ -183,7 +190,11 @@ class PushService : Service() {
                         val title = keyName.ifEmpty { msgTitle.ifEmpty { "新通知" } }
                         showNotification(title, msgBody, msgId, vibrate)
                         // 先弹通知再起震动：渠道自带的那一次短震也在这条路径里
-                        if (vibrate) startStrongVibrate(msgId, title, msgBody)
+                        if (vibrate) {
+                            startStrongVibrate(msgId, title, msgBody)
+                            // FSI 之外的第二条路：见 tryLaunchAlarmDirectly 的说明
+                            tryLaunchAlarmDirectly(msgId, messageNotifId(msgId), title, msgBody)
+                        }
                     }
                 } catch (_: Exception) {
                 }
@@ -316,6 +327,51 @@ class PushService : Service() {
 
     // ---------- 通知 ----------
 
+    // 兜底通道：不依赖系统 FSI，自己把告警页拉到最前。
+    //
+    // 为什么需要它：FSI 是「请系统代为启动 Activity」，而系统在启动前还要过一道更外面的闸门 ——
+    // Android 10+ 的**后台启动 Activity 限制**（BAL）。官方给系统闹钟/通话类应用留了白名单，
+    // 第三方应用不在其中；国产 ROM（小米/华为等）还额外加了「后台弹出界面」开关，默认关闭。
+    // 结果就是：权限、渠道、锁屏状态三项全绿，息屏时依然只有横幅。
+    //
+    // SYSTEM_ALERT_WINDOW（显示在其他应用上层）是 BAL 的**硬豁免**之一：拿到它，普通应用
+    // 也能从后台启动自己的 Activity，锁屏下同样生效（AlarmActivity 自带 showWhenLocked/
+    // turnScreenOn，会点亮屏幕并盖在锁屏之上）。
+    //
+    // 与 FSI 并行而非二选一：系统放行哪条就走哪条，两条都到也无害 —— AlarmActivity 是
+    // singleInstance，只会有一个实例，第二次进入走 onNewIntent 刷新内容。
+    // 未获权限时 startActivity 会被系统静默拦截（不抛异常、不崩溃），所以这里可以无条件尝试。
+    private fun tryLaunchAlarmDirectly(id: Long, notifId: Int, title: String, body: String) {
+        if (!Settings.canDrawOverlays(this)) {
+            LogHelper.append(this, "direct launch skipped: no overlay permission id=$id")
+            return
+        }
+        // 场景闸门与 AOSP 的 FSI 判定保持一致：息屏、锁屏 → 全屏；
+        // 用户正在使用设备（亮屏且已解锁）→ 只用横幅，不抢占他手上正在做的事。
+        val screenOn = runCatching {
+            (getSystemService(POWER_SERVICE) as PowerManager).isInteractive
+        }.getOrDefault(true)
+        val locked = runCatching {
+            (getSystemService(KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
+        }.getOrDefault(false)
+        if (screenOn && !locked) {
+            LogHelper.append(this, "direct launch skipped: interactive & unlocked id=$id")
+            return
+        }
+        try {
+            startActivity(
+                Intent(this, AlarmActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    .putExtra(AlarmActivity.EXTRA_TITLE, title)
+                    .putExtra(AlarmActivity.EXTRA_BODY, body)
+                    .putExtra(AlarmActivity.EXTRA_NOTIF_ID, notifId)
+            )
+            LogHelper.append(this, "direct launch alarm activity id=$id (screenOn=$screenOn locked=$locked)")
+        } catch (e: Exception) {
+            LogHelper.append(this, "direct launch failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+
     private fun ensureChannel(): NotificationManager {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -377,22 +433,24 @@ class PushService : Service() {
         }
     }
 
-    // 锁屏全屏页（FSI）能否弹出，卡在三个**都在用户手上、App 只能读不能改**的外部开关上：
+    // 锁屏全屏页（FSI）能否弹出，卡在几个**都在用户手上、App 只能读不能改**的外部开关上：
     //   ① USE_FULL_SCREEN_INTENT 权限（Android 14+）
     //   ② 推送渠道重要性（官方要求 ≥ IMPORTANCE_HIGH，且渠道一旦被调低就再也改不回来）
     //   ③ 通知总开关
-    // 出问题时现场只在日志里，所以每条强震消息都把这四项快照打出来。
-    // 判定方法：日志里若「strong vibrate start」之后没有对应的「AlarmActivity onCreate」，
-    // 说明这一次被系统降级成了横幅（Android 13 起，判定「用户正在使用设备」时必然降级）。
+    //   ④ SYSTEM_ALERT_WINDOW（悬浮窗）—— 不满足时 FSI 仍可能被 BAL/ROM 拦下，
+    //      满足时服务可以自己把告警页拉起来（tryLaunchAlarmDirectly）
+    // 出问题时现场只在日志里，所以每条强震消息都把这五项快照打出来。
+    // 判定方法：日志里若「strong vibrate start」之后既没有「AlarmActivity onCreate」也没有
+    // 「direct launch alarm activity」，说明这一次被系统降级成了横幅。
     private fun logFsiFacts() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         val screenOn = runCatching {
-            (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive
+            (getSystemService(POWER_SERVICE) as PowerManager).isInteractive
         }.getOrDefault(true)
         LogHelper.append(
             this,
             "fsi facts: fsiPerm=${canUseFullScreenIntent(this)} channelImportance=${pushChannelImportance(this)} " +
-                "notifEnabled=${nm.areNotificationsEnabled()} screenOn=$screenOn"
+                "notifEnabled=${nm.areNotificationsEnabled()} overlayPerm=${canDrawOverlays(this)} screenOn=$screenOn"
         )
     }
 
@@ -540,6 +598,10 @@ class PushService : Service() {
             else runCatching {
                 (ctx.getSystemService(NOTIFICATION_SERVICE) as NotificationManager).canUseFullScreenIntent()
             }.getOrDefault(true)
+
+        // 悬浮窗权限（显示在其他应用上层）：后台启动 Activity 的硬豁免，设置页据此引导用户
+        fun canDrawOverlays(ctx: Context): Boolean =
+            runCatching { Settings.canDrawOverlays(ctx) }.getOrDefault(false)
 
         // 推送渠道当前重要性。官方硬性要求：渠道低于 IMPORTANCE_HIGH 时系统**不会**启动 FSI，
         // 而渠道重要性一旦被用户手动调低，App 就再也改不回来（只能引导用户去系统设置）。

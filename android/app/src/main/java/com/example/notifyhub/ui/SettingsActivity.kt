@@ -34,9 +34,10 @@ class SettingsActivity : AppCompatActivity() {
         // 底部页签：首页 / 定时任务 / 设置
         BottomNav.bind(this, SettingsActivity::class.java)
 
-        // ---- 提醒权限（强力震动相关的三项官方检测）----
+        // ---- 提醒权限（强力震动的全屏链路依赖的三项系统开关）----
         findViewById<Button>(R.id.btnFsiSetting).setOnClickListener { openFullScreenIntentSetting() }
         findViewById<Button>(R.id.btnChannelSetting).setOnClickListener { openChannelSetting() }
+        findViewById<Button>(R.id.btnOverlaySetting).setOnClickListener { openOverlaySetting() }
         refreshPermissionState()
 
         // ---- 版本与更新 ----
@@ -116,13 +117,15 @@ class SettingsActivity : AppCompatActivity() {
         com.example.notifyhub.data.UpdateChecker.resumePendingInstall(this)
     }
 
-    // 三项官方检测：
+    // 四项检测：
     //   ① 通知总开关 —— 关掉后我们**不会**震动（否则就是「我把通知关了它还在震」，必被投诉）
     //   ② 全屏通知（Android 14+）—— 未授权时连锁屏都只剩 60 秒横幅；但震动不受影响
     //   ③ 推送渠道重要性 —— 官方硬性要求 ≥ IMPORTANCE_HIGH，低于它系统绝不启动全屏页；
     //      而渠道一旦被用户调低，App 再也改不回来（只能引导用户去系统设置），所以必须读出来
+    //   ④ 悬浮窗权限 —— 官方 API，能读能跳转。它是 Android 10+ 后台启动 Activity 的硬豁免，
+    //      也是本应用在 ROM 拦下 FSI 时唯一能自己把告警页拉起来的手段，所以优先级最高
     // 厂商自建的「后台弹出界面」权限不做反射探测（非官方 API，ROM 一升级就静默误判），
-    // 失效的探测比不探测更糟 —— 需要时按上面的提示文字手动前往即可。
+    // 失效的探测比不探测更糟 —— 改为在卡片底部用文字引导用户手动前往。
     private fun refreshPermissionState() {
         val tvNotif = findViewById<TextView>(R.id.tvNotifStatus)
         val tvFsi = findViewById<TextView>(R.id.tvFsiStatus)
@@ -146,6 +149,15 @@ class SettingsActivity : AppCompatActivity() {
             tvFsi.setTextColor(if (fsiOk) 0xFF17994F.toInt() else 0xFFC07F00.toInt())
             btnFsi.visibility = if (fsiOk) View.GONE else View.VISIBLE
         }
+
+        // 悬浮窗（显示在其他应用上层）：官方检测 API，授予后可绕开后台启动界面限制
+        val tvOv = findViewById<TextView>(R.id.tvOverlayStatus)
+        val btnOv = findViewById<Button>(R.id.btnOverlaySetting)
+        val ovOk = PushService.canDrawOverlays(this)
+        tvOv.text = if (ovOk) "悬浮窗权限：已开启 —— 息屏/锁屏时会直接拉起全屏告警页"
+        else "悬浮窗权限：未开启 —— 系统全屏通知被拦截时无法兜底，息屏只剩横幅"
+        tvOv.setTextColor(if (ovOk) 0xFF17994F.toInt() else 0xFFC07F00.toInt())
+        btnOv.visibility = if (ovOk) View.GONE else View.VISIBLE
 
         // 渠道重要性分档：-1 未创建 / NONE 被关闭 / <HIGH 被调低 / ≥HIGH 正常
         val tvCh = findViewById<TextView>(R.id.tvChannelStatus)
@@ -210,6 +222,28 @@ class SettingsActivity : AppCompatActivity() {
         } catch (e: Exception) {
             findViewById<TextView>(R.id.tvFsiStatus).text =
                 "无法打开系统设置，请手动前往：设置 → 应用 → 特殊应用权限 → 全屏通知"
+        }
+    }
+
+    // 「显示在其他应用上层」是特殊权限，只能跳到系统页由用户手动勾选（没有运行时弹窗可申请）
+    private fun openOverlaySetting() {
+        try {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                    .setData(Uri.fromParts("package", packageName, null))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            try {
+                // 个别 ROM 不认带 package 的入口，退到权限列表页
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (_: Exception) {
+                findViewById<TextView>(R.id.tvOverlayStatus).text =
+                    "无法打开系统设置，请手动前往：设置 → 应用 → 特殊应用权限 → 显示在其他应用上层"
+            }
         }
     }
 

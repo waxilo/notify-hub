@@ -5,7 +5,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
@@ -14,9 +13,10 @@ import com.example.notifyhub.LogHelper
 import com.example.notifyhub.R
 import com.example.notifyhub.data.PushService
 
-// 强力震动的锁屏告警页。两个入口：
-//   ① 通知的 fullScreenIntent（锁屏/灭屏时系统自动拉起）
-//   ② 用户点击那条横幅（解锁态下的必经路径 —— 系统只给横幅不给全屏页）
+// 强力震动的锁屏告警页。三个入口：
+//   ① 通知的 fullScreenIntent（系统放行时自动拉起）
+//   ② 用户点击那条横幅（系统降级为横幅时的必经路径）
+//   ③ PushService 直接 startActivity（拿到悬浮窗权限、但 ROM 拦下了 FSI 时的兜底）
 //
 // 为什么单独建一个 Activity 而不是复用主界面（MainActivity/KeysActivity）：
 // 覆盖锁屏的这个「身份」自带三条约束，只有专用页才能干净地满足 ——
@@ -25,7 +25,8 @@ import com.example.notifyhub.data.PushService
 //   ③ 自动关闭必须与震动停止同源 → 下面 requestStop() 与超时都汇到 PushService 同一个入口
 // 复用主界面则 ② 无解：主界面必须留在最近任务里，而这些约束会直接落到 App 的正常启动路径上。
 //
-// 亮屏解锁态系统一定降级为横幅，本页不会自动启动 —— 那时它就是「点横幅」的落点。
+// 页面只有标题、正文、关闭三样东西。亮屏解锁态系统一定降级为横幅，本页不会自动启动 ——
+// 那时它就是「点横幅」的落点。
 class AlarmActivity : AppCompatActivity() {
 
     private val handler = Handler(Looper.getMainLooper())
@@ -36,19 +37,6 @@ class AlarmActivity : AppCompatActivity() {
 
     // 震动是否已经停了。点横幅进来时立刻置 true（用户已经看到了）
     private var stopped = false
-    private var deadline = 0L
-
-    // 每秒半刷新倒计时。除了给用户「不点还能响多久」的预期，
-    // 这行字也是本页唯一的「还活着」证据 —— 停在「已停止震动」就说明不会再震了
-    private val tick = object : Runnable {
-        override fun run() {
-            val left = ((deadline - System.currentTimeMillis()) / 1000L).coerceAtLeast(0L)
-            findViewById<TextView>(R.id.tvAlarmStatus).text =
-                if (stopped) "已停止震动"
-                else "震动中 · ${left} 秒后自动停止"
-            if (!stopped && left > 0) handler.postDelayed(this, 500L)
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,12 +56,13 @@ class AlarmActivity : AppCompatActivity() {
         setContentView(R.layout.activity_alarm)
 
         findViewById<Button>(R.id.btnStop).setOnClickListener {
-            // 停止 = 停震 + 撤横幅 + 关页面。「停止」这个动作的语义就是让提醒彻底消失，
+            // 停止 = 停震 + 撤横幅 + 关页面。「关闭」这个动作的语义就是让提醒彻底消失，
             // 内容在通知栏与历史页都还查得到，所以不必把页面留着。
             if (!stopped) requestStop(withNotifId = true, reason = "user")
             stopped = true
             dismiss("user")
         }
+
         bind(intent)
         LogHelper.append(this, "AlarmActivity onCreate")
     }
@@ -101,15 +90,11 @@ class AlarmActivity : AppCompatActivity() {
         val body = i?.getStringExtra(EXTRA_BODY).orEmpty()
         findViewById<TextView>(R.id.tvAlarmTitle).text = title
         findViewById<TextView>(R.id.tvAlarmBody).text = body
-        findViewById<TextView>(R.id.tvAlarmBody).visibility = if (body.isBlank()) View.GONE else View.VISIBLE
         findViewById<Button>(R.id.btnStop).text = if (stopped) "关闭" else "停止震动"
 
         // 30 秒自动关闭：与震动超时同一时长，避免出现「界面关了还在震」
-        deadline = System.currentTimeMillis() + AUTO_CLOSE_MS
         handler.removeCallbacks(autoClose)
         handler.postDelayed(autoClose, AUTO_CLOSE_MS)
-        handler.removeCallbacks(tick)
-        handler.post(tick)
     }
 
     // 停震请求统一交给 PushService —— 它是唯一持有震动状态的地方，不存在「两边各自停一半」。
@@ -128,7 +113,6 @@ class AlarmActivity : AppCompatActivity() {
 
     private fun dismiss(reason: String) {
         handler.removeCallbacks(autoClose)
-        handler.removeCallbacks(tick)
         // 超时走出这条路径：震动停掉，通知由 PushService 收回通知栏
         if (!stopped) {
             stopped = true
@@ -152,7 +136,7 @@ class AlarmActivity : AppCompatActivity() {
         const val EXTRA_BODY = "alarm_body"
         // 本条消息对应的通知 id（= PushService.messageNotifId 的值），停止时用它撤销通知
         const val EXTRA_NOTIF_ID = "alarm_notif_id"
-        // true = 用户点击横幅进页（不是系统全屏拉起）→ 进页即视为已看到，立刻停震
+        // true = 用户点击横幅进页（不是系统/服务拉起）→ 进页即视为已看到，立刻停震
         const val EXTRA_FROM_TAP = "alarm_from_tap"
         private const val AUTO_CLOSE_MS = 30_000L
     }

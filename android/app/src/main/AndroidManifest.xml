@@ -10,6 +10,11 @@
     <!-- 锁屏全屏告警页：低于 IMPORTANCE_HIGH 的渠道上 FSI 完全不生效；
          Android 14 起非闹钟/通话类应用需检测 canUseFullScreenIntent()（设置页已做引导） -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- 显示在其他应用上层（悬浮窗）：这是 Android 10+ 「后台启动 Activity 限制」的**硬豁免**。
+         系统闹钟等预装应用天然在白名单里，第三方应用拿不到，于是国产 ROM 上的表现就是
+         「闹钟能全屏、自己的应用只剩横幅」。拿到本权限后，PushService 可以自己把告警页
+         拉到最前并覆盖锁屏，不再依赖 ROM 是否放行 FSI。属特殊权限，需用户在系统设置里手动开启。 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
