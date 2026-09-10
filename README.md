@@ -89,9 +89,10 @@ wrangler deploy
 2. 部署：
    ```bash
    cd notify-hub/pages
-   wrangler pages deploy .
+   wrangler pages deploy . --project-name notify-hub-pages
    ```
-   或在 Cloudflare Pages 控制台连接仓库、构建输出目录设为 `pages/`、无需构建命令。
+   或在 `worker/` 下一键：`npm run deploy:pages`。
+   也可在 Cloudflare Pages 控制台连接仓库、构建输出目录设为 `pages/`、无需构建命令。
 
 Web 控制台只做配置：**注册/登录 → 生成 Key（页面会给出完整 key 与 webhook 地址）→ 吊销 Key → 修改密码**。
 
@@ -104,7 +105,32 @@ Web 控制台只做配置：**注册/登录 → 生成 Key（页面会给出完�
 3. 登录/注册后，通知收件箱会自动轮询拉取。
 4. 点击某条通知可标记已读。
 
-> 此目录为**可编译脚手架**，本环境无 Android SDK，未做编译验证，请在你本地 Android Studio 中构建。
+> 每次推送到 `main` 会由 CI 自动构建并发布 APK（见下节），无需本地 Android SDK。
+
+---
+
+## 四、构建新版 APK（GitHub Actions + gh）
+
+`android/` 未提交 Gradle wrapper，本地构建需 Android Studio；走 CI 更省事。推送到 `main` 会自动触发 `.github/workflows/build-android.yml`。
+
+版本与签名规则：
+
+- `versionCode` = GitHub run number，`versionName` = `1.0.<run_number>`（App 端靠 `versionCode` 比对检测更新）
+- 使用固定签名 `android/app/notifyhub-release.p12`，覆盖安装不会报"签名不一致"
+- 构建后覆盖发布到 tag `latest` 的 Release，下载地址固定为
+  `https://github.com/waxilo/notify-hub/releases/latest/download/<asset>.apk`
+- Worker 的 `/api/app/latest` 从 Release body 解析 `VERSION_CODE` / `VERSION_NAME`，仓库私有故由 Worker 用 `GITHUB_TOKEN` 代理下载
+
+常用命令（`gh` 安装：`winget install GitHub.cli`，首次 `gh auth login`）：
+
+```bash
+gh workflow run build-android.yml                     # 不改代码也可手动构建
+gh run list --workflow=build-android.yml --limit 5    # 查看构建历史
+gh run watch                                          # 实时跟踪当前构建
+gh run view --log-failed                              # 失败时看日志
+gh release view latest --json name,assets             # 确认 APK 已发布
+gh release download latest -p "*.apk"                 # 手动下载 APK
+```
 
 ---
 
@@ -145,7 +171,7 @@ curl -X POST "https://notify-hub-worker.<sub>.workers.dev/hook/<KEY>" \
 
 ---
 
-## 四、定时任务（分钟级）
+## 五、定时任务（分钟级）
 
 服务端持有配置与执行权：Worker 的 Cron Trigger 每分钟唤醒一次，扫描 `jobs` 表执行到期任务，
 写通知后走既有的 Durable Object → WebSocket 链路推送给 App。**端侧（Web / App）只做配置，不跑任何定时器。**
