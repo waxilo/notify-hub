@@ -74,15 +74,6 @@ class AlarmActivity : AppCompatActivity() {
             stopped = true
             dismiss("user")
         }
-        findViewById<Button>(R.id.btnOpenApp).setOnClickListener {
-            // 看详情不停震：用户点的是「我看看是什么事」，不是「我知道了」。
-            // 全屏页与主界面并存：本页是 singleInstance，不会被主界面顶掉。
-            startActivity(
-                Intent(this, KeysActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            )
-        }
-
         bind(intent)
         LogHelper.append(this, "AlarmActivity onCreate")
     }

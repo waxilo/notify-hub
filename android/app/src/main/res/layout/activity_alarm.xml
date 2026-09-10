@@ -69,12 +69,4 @@
         android:background="@drawable/bg_btn_primary"
         android:layout_width="match_parent"
         android:layout_height="52dp" />
-
-    <Button
-        android:id="@+id/btnOpenApp"
-        android:text="查看详情"
-        android:textSize="14sp"
-        android:layout_marginTop="10dp"
-        android:layout_width="match_parent"
-        android:layout_height="48dp" />
 </LinearLayout>
