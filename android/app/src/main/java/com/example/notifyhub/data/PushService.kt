@@ -644,21 +644,9 @@ class PushService : Service() {
             )
             b.setFullScreenIntent(fsPi, true)
 
-            // 通知上的「停止震动」按钮：不用点进 App、也不用干等 30 秒超时。
-            // 带 notif_id → PushService 会连横幅一起撤掉。
-            b.addAction(
-                Notification.Action.Builder(
-                    android.R.drawable.ic_menu_close_clear_cancel,
-                    "停止震动",
-                    PendingIntent.getService(
-                        this, rc + ACTION_REQUEST_OFFSET,
-                        Intent(this, PushService::class.java)
-                            .setAction(ACTION_STOP_VIBRATE)
-                            .putExtra(EXTRA_NOTIF_ID, rc),
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-                ).build()
-            )
+            // 不在通知上挂「停止震动」action 按钮：横幅本身空间有限，
+            // 按钮在部分 ROM 上会把标题正文挤成一行，反而看不清是什么事。
+            // 停止路径仍有三条：点横幅进告警页、滑掉通知、30 秒超时。
 
             // 滑掉通知 = 停止震动。只给强震通知挂：否则滑掉一条普通通知会误停
             // 另一条消息正在进行的震动。
@@ -686,7 +674,7 @@ class PushService : Service() {
         const val FG_CHANNEL_ID = "notify_hub_foreground"
         const val FOREGROUND_ID = 1001
 
-        // 震动停止指令：点击通知 / 滑掉通知 / 通知按钮 / 告警页按钮 / 超时关闭 都汇到这一个入口
+        // 震动停止指令：点击通知 / 滑掉通知 / 告警页按钮 / 超时关闭 都汇到这一个入口
         const val ACTION_STOP_VIBRATE = "com.example.notifyhub.STOP_VIBRATE"
         // 随停止指令携带的通知 id：>0 表示「连横幅一起撤掉」（用户主动停止），
         // 缺省表示只停震（滑掉通知 / 超时，通知本身已消失或另有收回逻辑）
@@ -704,7 +692,6 @@ class PushService : Service() {
         // 同一条通知下三种 PendingIntent 的 requestCode 分段：共用 rc 基址 + 各自偏移，
         // 既保证互不覆盖，又保证同一条消息每次重建时能命中同一个 PendingIntent
         private const val FS_REQUEST_OFFSET = 100_000
-        private const val ACTION_REQUEST_OFFSET = 200_000
         private const val DELETE_REQUEST_OFFSET = 300_000
 
         // 服务端为每条消息生成唯一 dedup_key（srv-<uuid>），重推消息由本缓存判重；
