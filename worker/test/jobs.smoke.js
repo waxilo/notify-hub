@@ -6,7 +6,7 @@
 // 运行：cd worker && node test/jobs.smoke.js
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
-import { runDueJobs, deleteJob, listJobs } from '../src/jobs.js';
+import { runDueJobs, deleteJob, listJobs, createJob, updateJob } from '../src/jobs.js';
 import { clearNotifications } from '../src/notifications.js';
 import { deleteKey, updateKey } from '../src/keys.js';
 import { handleWebhook } from '../src/webhook.js';
@@ -30,6 +30,14 @@ const stmt = (sql) => {
   const s = db.prepare(sql);
   return {
     bind(...args) {
+      // 真实 D1 对 undefined 会抛 D1_TYPE_ERROR，这里对齐该行为。
+      // 否则「SQL 里加了占位符、却忘了定义对应变量」这类错误会被静默吞掉，
+      // 直到线上某个接口 500 才暴露（本文件的 createJob/updateJob 就踩过）。
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === undefined) {
+          throw new TypeError(`D1_TYPE_ERROR: Type 'undefined' not supported for binding (arg #${i})`);
+        }
+      }
       return {
         async all() { return { results: s.all(...args) }; },
         async first() { return s.get(...args) ?? null; },
@@ -305,6 +313,36 @@ await updateKey(new Request('https://x/api/keys/5', {
   body: JSON.stringify({ name: '改个名' }),
 }), env, 1, 5);
 ck('updateKey 不传开关时保留原值', db.prepare('SELECT strong_vibrate FROM keys WHERE id=5').get().strong_vibrate === 1);
+
+// 19) createJob / updateJob 的写入路径
+// 这两条曾经出问题：updateJob 的 SQL 加了 strong_vibrate 占位符却忘了定义对应变量（线上 500），
+// createJob 的 INSERT 则整列都没带（新建任务的开关被静默丢弃）。此处把两条路径一起锁住。
+const mkBody = (over = {}) => JSON.stringify({
+  name: '打卡提醒', body: '远程签到30元', schedule: 'daily:21:01', tz: '+08:00',
+  enabled: true, strong_vibrate: true, ...over,
+});
+
+const crRes = await createJob(new Request('https://x/api/jobs', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: mkBody(),
+}), env, 1);
+ck('createJob 返回 201', crRes.status === 201, 'status=' + crRes.status);
+const newJobId = (await crRes.json()).id;
+ck('createJob 写入 strong_vibrate=1',
+  db.prepare('SELECT strong_vibrate FROM jobs WHERE id=?').get(newJobId).strong_vibrate === 1);
+
+const upRes = await updateJob(new Request('https://x/api/jobs/' + newJobId, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: mkBody(),
+}), env, 1, newJobId);
+ck('updateJob 返回 200（原为 500）', upRes.status === 200, 'status=' + upRes.status);
+ck('updateJob 写入 strong_vibrate=1',
+  db.prepare('SELECT strong_vibrate FROM jobs WHERE id=?').get(newJobId).strong_vibrate === 1);
+
+await updateJob(new Request('https://x/api/jobs/' + newJobId, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: '改个名' }),
+}), env, 1, newJobId);
+ck('updateJob 不传开关时保留原值',
+  db.prepare('SELECT strong_vibrate FROM jobs WHERE id=?').get(newJobId).strong_vibrate === 1);
 
 console.log(bad ? '\n' + bad + ' FAILED' : '\nALL PASS');
 process.exit(bad ? 1 : 0);

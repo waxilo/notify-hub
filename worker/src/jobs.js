@@ -135,14 +135,15 @@ export async function createJob(request, env, userId) {
   // key_id 恒为 NULL：定时任务不挂外部 key。旧版客户端仍会传 key_id，这里直接忽略（不报错）。
   // title 列已废弃（标题一律取任务名称），保留列不写值。
   const res = await env.DB.prepare(
-    `INSERT INTO jobs (user_id, key_id, name, schedule, tz, title, body, enabled, next_run_at, created_at, updated_at)
-     VALUES (?,NULL,?,?,?,NULL,?,?,?,?,?)`
+    `INSERT INTO jobs (user_id, key_id, name, schedule, tz, title, body, enabled, strong_vibrate, next_run_at, created_at, updated_at)
+     VALUES (?,NULL,?,?,?,NULL,?,?,?,?,?,?)`
   ).bind(
     userId,
     name,
     schedule, tz,
     String(b.body || '').slice(0, 8000),
     b.enabled === false ? 0 : 1,
+    b.strong_vibrate ? 1 : 0,
     next, now, now,
   ).run();
 
@@ -164,6 +165,8 @@ export async function updateJob(request, env, userId, id) {
   if (!name) return json({ error: 'name is required' }, 400);
   const body = b.body !== undefined ? String(b.body).slice(0, 8000) : job.body;
   const enabled = b.enabled !== undefined ? (b.enabled ? 1 : 0) : job.enabled;
+  // 与 updateKey 同策略：字段不传就不改（旧版客户端不会带这个字段，不能把用户的开关抹掉）
+  const strongVibrate = b.strong_vibrate !== undefined ? (b.strong_vibrate ? 1 : 0) : job.strong_vibrate;
 
   const now = Date.now();
   // 计划变更、或把停用的任务重新启用时，重算下次触发时刻（否则残留的旧时刻会让它立刻补跑一次）
