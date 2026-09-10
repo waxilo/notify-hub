@@ -56,6 +56,9 @@ class JobsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnRefresh).setOnClickListener { load() }
         findViewById<Button>(R.id.btnAdd).setOnClickListener { openEdit(null) }
 
+        // 底部页签：首页 / 定时任务 / 设置
+        BottomNav.bind(this, JobsActivity::class.java)
+
         load()
     }
 

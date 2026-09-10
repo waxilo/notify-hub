@@ -39,6 +39,20 @@
         <item name="android:textColor">@color/text_main</item>
     </style>
 
+    <!-- 底部页签的单个按钮：图标在上、文字在下，等分宽度 -->
+    <style name="NavItem">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:background">?android:attr/selectableItemBackground</item>
+    </style>
+
     <!-- 对话框：圆角白底 + 品牌色按钮文字 -->
     <style name="Theme.AppDialog" parent="Theme.AppCompat.DayNight.Dialog.Alert">
         <item name="colorPrimary">@color/primary</item>

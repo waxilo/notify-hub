@@ -25,6 +25,9 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
+        // 底部页签：首页 / 定时任务 / 设置
+        BottomNav.bind(this, SettingsActivity::class.java)
+
         // ---- 版本与更新 ----
         val tvVersion = findViewById<TextView>(R.id.tvVersion)
         val tvUpdate = findViewById<TextView>(R.id.tvUpdateMsg)

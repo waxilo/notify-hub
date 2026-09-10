@@ -34,7 +34,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// 首页：Key 列表管理（测试 / 历史 / 编辑），收件箱与设置从顶栏进入
+// 首页：Key 列表管理（测试 / 历史 / 编辑）；定时任务与设置从底部页签进入
 class KeysActivity : AppCompatActivity() {
 
     private val keys = mutableListOf<KeyItem>()
@@ -72,14 +72,10 @@ class KeysActivity : AppCompatActivity() {
         rv.layoutManager = LinearLayoutManager(this)
         rv.adapter = adapter
 
-        findViewById<Button>(R.id.btnSettings).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
-        // 定时任务：配置在服务端，由 Worker Cron 每分钟扫描执行，App 只做配置界面
-        findViewById<Button>(R.id.btnJobs).setOnClickListener {
-            startActivity(Intent(this, JobsActivity::class.java))
-        }
         findViewById<Button>(R.id.btnRefresh).setOnClickListener { loadKeys() }
+
+        // 底部页签：首页 / 定时任务 / 设置
+        BottomNav.bind(this, KeysActivity::class.java)
 
         loadKeys()
     }

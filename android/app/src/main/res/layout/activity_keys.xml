@@ -32,23 +32,8 @@
             android:layout_height="wrap_content" />
 
         <Button
-            android:id="@+id/btnJobs"
-            android:text="定时任务"
-            android:textSize="13sp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-
-        <Button
             android:id="@+id/btnRefresh"
             android:text="刷新"
-            android:textSize="13sp"
-            android:layout_marginStart="8dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-
-        <Button
-            android:id="@+id/btnSettings"
-            android:text="设置"
             android:textSize="13sp"
             android:layout_marginStart="8dp"
             android:layout_width="wrap_content"
@@ -73,5 +58,9 @@
         android:paddingTop="4dp"
         android:paddingBottom="16dp"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- 底部页签 -->
+    <include layout="@layout/view_bottom_nav" />
 </LinearLayout>
