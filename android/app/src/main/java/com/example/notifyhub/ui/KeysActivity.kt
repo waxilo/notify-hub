@@ -22,9 +22,7 @@ import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.KeyItem
 import com.example.notifyhub.api.UpdateKeyReq
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -88,13 +86,15 @@ class KeysActivity : AppCompatActivity() {
                 LogHelper.append(this@KeysActivity, "listKeys ok size=${list.size}")
                 keys.clear()
                 keys.addAll(list)
-                withContext(Dispatchers.Main) { adapter.notifyDataSetChanged() }
+                // 不必切 Main：Api.safe 的 withContext(IO) 在返回时已恢复调用方（主线程）上下文，
+                // 再套一层 withContext(Main) 只是内嵌同一个 dispatcher，没有意义
+                adapter.notifyDataSetChanged()
             } catch (e: retrofit2.HttpException) {
                 LogHelper.append(this@KeysActivity, "listKeys http ${e.code()}")
                 if (e.code() == 401) backToLogin()
             } catch (_: Exception) {
             } finally {
-                withContext(Dispatchers.Main) { loading.hide() }
+                loading.hide()
             }
         }
     }
@@ -113,19 +113,15 @@ class KeysActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 Api.safe { Api.instance(this@KeysActivity).updateKey(k.id, UpdateKeyReq(active = active)) }
-                withContext(Dispatchers.Main) {
-                    val name = k.name ?: "未命名"
-                    Toast.makeText(
-                        this@KeysActivity,
-                        if (active) "已启用「$name」" else "已停用「$name」，外部调用将被拒绝",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    loadKeys()
-                }
+                val name = k.name ?: "未命名"
+                Toast.makeText(
+                    this@KeysActivity,
+                    if (active) "已启用「$name」" else "已停用「$name」，外部调用将被拒绝",
+                    Toast.LENGTH_SHORT
+                ).show()
+                loadKeys()
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@KeysActivity, "操作失败：${e.message}", Toast.LENGTH_SHORT).show()
-                }
+                Toast.makeText(this@KeysActivity, "操作失败：${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -139,14 +135,10 @@ class KeysActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     try {
                         Api.safe { Api.instance(this@KeysActivity).deleteKey(k.id) }
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@KeysActivity, "已删除「${k.name}」", Toast.LENGTH_SHORT).show()
-                            loadKeys()
-                        }
+                        Toast.makeText(this@KeysActivity, "已删除「${k.name}」", Toast.LENGTH_SHORT).show()
+                        loadKeys()
                     } catch (e: Exception) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@KeysActivity, "删除失败：${e.message}", Toast.LENGTH_SHORT).show()
-                        }
+                        Toast.makeText(this@KeysActivity, "删除失败：${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -202,9 +194,10 @@ class KeysActivity : AppCompatActivity() {
                     dialog.dismiss()
                     loadKeys()
                 } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@KeysActivity, "保存失败：${e.message}", Toast.LENGTH_SHORT).show()
-                    }
+                    // 这里已经在主线程（Api.safe 内部切到 IO，异常抛出后回到调用方上下文），
+                    // 不要再套 withContext(Dispatchers.Main) —— 那是内嵌而非切换，
+                    // 会让 toast 被静默吞掉，表现为「点保存没反应」
+                    Toast.makeText(this@KeysActivity, "保存失败：${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }

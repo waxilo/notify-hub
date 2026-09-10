@@ -84,6 +84,12 @@ export default {
         const e = requireAuth(uid); if (e) return e;
         return listKeys(request, env, uid);
       }
+      // PUT 必须排在 DELETE 之前（两种方法互不干扰，但保持读起来一致的顺序）
+      if (p.startsWith('/keys/') && request.method === 'PUT') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return updateKey(request, env, uid, p.split('/')[2]);
+      }
       if (p.startsWith('/keys/') && request.method === 'DELETE') {
         const uid = await getUserId(request, env);
         const e = requireAuth(uid); if (e) return e;

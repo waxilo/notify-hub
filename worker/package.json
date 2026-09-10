@@ -8,7 +8,7 @@
     "dev:cron": "wrangler dev --test-scheduled",
     "deploy": "wrangler deploy",
     "deploy:pages": "wrangler pages deploy ../pages --project-name notify-hub-pages",
-    "test": "node test/schedule.test.js && node test/jobs.smoke.js",
+    "test": "node test/schedule.test.js && node test/jobs.smoke.js && node test/routes.test.js",
     "migrate": "wrangler d1 execute notify-hub --remote --file=./migrations/0001_init.sql",
     "migrate:local": "wrangler d1 execute notify-hub --local --file=./migrations/0001_init.sql",
     "migrate:sync": "wrangler d1 execute notify-hub --remote --file=./migrations/0002_schema_sync.sql",
