@@ -1,6 +1,10 @@
 // 定时任务：CRUD + Cron 扫描执行
 // 执行完全在服务端：Cron Triggers 每分钟唤醒一次 → 扫 jobs 表 → 到期的写通知并推送。
 // App / Web 只负责配置，端侧不需要任何定时器代码（也就没有 Doze、进程被杀、多端重复执行的问题）。
+//
+// 定时任务不挂 key：key 是给外部系统调 /hook/:key 用的凭证，与站内定时提醒是两条独立来源。
+// 定时任务直接产生「默认类型」通知 —— 标题 = 任务名称，正文 = 通知内容（留空则同任务名），
+// 不带模板渲染、不占用任何 key，通知的 key_id 为 NULL（也就不会出现在某个 key 的发送历史里）。
 import { json, readJson } from './utils.js';
 import { parseSchedule, parseOffset, nextRunAt, describeSchedule } from './schedule.js';
 import { deliver } from './deliver.js';
@@ -16,11 +20,11 @@ export async function runDueJobs(env, nowMs) {
   if (!env || !env.DB) return { scanned: 0, fired: 0, errors: 0, skipped: true };
 
   // 命中 idx_jobs_due：扫到的行数 = 到期 job 数，没有到期时读取行数接近 0
+  // 不要在这里 JOIN keys —— 会让扫描退化成带连接的查询，白白多读 keys 表
   const rows = await env.DB.prepare(
-    `SELECT j.*, k.name AS key_name
-       FROM jobs j LEFT JOIN keys k ON k.id = j.key_id
-      WHERE j.enabled = 1 AND j.next_run_at IS NOT NULL AND j.next_run_at <= ?
-      ORDER BY j.next_run_at
+    `SELECT * FROM jobs
+      WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?
+      ORDER BY next_run_at
       LIMIT ?`
   ).bind(now, MAX_PER_TICK).all();
 
@@ -43,14 +47,19 @@ async function fireJob(env, job, now) {
   const offset = parseOffset(job.tz) ?? 0;
   const firedAt = Number(job.next_run_at);
 
+  // 默认类型通知：标题固定取任务名称（jobs.title 已废弃不再读取），正文取通知内容。
+  // 正文不能为空 —— deliver 对空正文只入库不推送，会让任务看着像没触发。
+  const name = String(job.name || '').trim() || '定时提醒';
+
   // 1) 先投递。dedup_key 带「计划触发时刻」，配合 5 分钟窗口实现幂等：
   //    并发执行或推进 job 失败后重试，都不会产生重复通知。
+  //    keyId=null + keyName='' ：这条通知不属于任何外部 key。
   await deliver(env, {
     userId: job.user_id,
-    keyId: job.key_id,
-    keyName: job.key_name || '',
-    title: job.title || job.name || '定时提醒',
-    body: (job.body && String(job.body).trim()) ? job.body : (job.name || '定时提醒'),
+    keyId: null,
+    keyName: '',
+    title: name,
+    body: (job.body && String(job.body).trim()) ? job.body : name,
     payload: JSON.stringify({ source: 'job', job_id: job.id, scheduled_at: firedAt }),
     dedupKey: `job:${job.id}:${firedAt}`,
     dedup: true,
@@ -76,13 +85,12 @@ async function fireJob(env, job, now) {
 
 export async function listJobs(request, env, userId) {
   const rows = await env.DB.prepare(
-    `SELECT j.*, k.name AS key_name
-       FROM jobs j LEFT JOIN keys k ON k.id = j.key_id
-      WHERE j.user_id = ?
-      ORDER BY j.enabled DESC, j.next_run_at`
+    `SELECT * FROM jobs WHERE user_id = ? ORDER BY enabled DESC, next_run_at`
   ).bind(userId).all();
   const jobs = (rows.results || []).map((j) => ({
     ...j,
+    // 标题固定为任务名称，端侧无需再拼接
+    title: j.name || '',
     desc: describeSchedule(j.schedule, j.tz),
   }));
   return json({ jobs });
@@ -97,10 +105,8 @@ export async function createJob(request, env, userId) {
   const offset = parseOffset(tz);
   if (offset === null) return json({ error: 'invalid tz' }, 400);
 
-  const keyId = parseInt(b.key_id, 10);
-  if (!Number.isFinite(keyId) || keyId <= 0) return json({ error: 'key_id is required' }, 400);
-  const k = await env.DB.prepare('SELECT id FROM keys WHERE id=? AND user_id=?').bind(keyId, userId).first();
-  if (!k) return json({ error: 'key not found' }, 404);
+  const name = String(b.name || '').trim().slice(0, 64);
+  if (!name) return json({ error: 'name is required' }, 400);
 
   const cnt = await env.DB.prepare('SELECT COUNT(*) AS c FROM jobs WHERE user_id=?').bind(userId).first();
   if (cnt && cnt.c >= MAX_JOBS_PER_USER) {
@@ -109,14 +115,15 @@ export async function createJob(request, env, userId) {
 
   const now = Date.now();
   const next = nextRunAt(schedule, offset, now, now);
+  // key_id 恒为 NULL：定时任务不挂外部 key。旧版客户端仍会传 key_id，这里直接忽略（不报错）。
+  // title 列已废弃（标题一律取任务名称），保留列不写值。
   const res = await env.DB.prepare(
     `INSERT INTO jobs (user_id, key_id, name, schedule, tz, title, body, enabled, next_run_at, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+     VALUES (?,NULL,?,?,?,NULL,?,?,?,?,?)`
   ).bind(
-    userId, keyId,
-    String(b.name || '').slice(0, 64),
+    userId,
+    name,
     schedule, tz,
-    String(b.title || '').slice(0, 500),
     String(b.body || '').slice(0, 8000),
     b.enabled === false ? 0 : 1,
     next, now, now,
@@ -136,28 +143,21 @@ export async function updateJob(request, env, userId, id) {
   const offset = parseOffset(tz);
   if (offset === null) return json({ error: 'invalid tz' }, 400);
 
-  const name = b.name !== undefined ? String(b.name).slice(0, 64) : job.name;
-  const title = b.title !== undefined ? String(b.title).slice(0, 500) : job.title;
+  const name = b.name !== undefined ? String(b.name).trim().slice(0, 64) : job.name;
+  if (!name) return json({ error: 'name is required' }, 400);
   const body = b.body !== undefined ? String(b.body).slice(0, 8000) : job.body;
   const enabled = b.enabled !== undefined ? (b.enabled ? 1 : 0) : job.enabled;
-
-  let keyId = job.key_id;
-  if (b.key_id !== undefined) {
-    keyId = parseInt(b.key_id, 10);
-    if (!Number.isFinite(keyId) || keyId <= 0) return json({ error: 'invalid key_id' }, 400);
-    const k = await env.DB.prepare('SELECT id FROM keys WHERE id=? AND user_id=?').bind(keyId, userId).first();
-    if (!k) return json({ error: 'key not found' }, 404);
-  }
 
   const now = Date.now();
   // 计划变更、或把停用的任务重新启用时，重算下次触发时刻（否则残留的旧时刻会让它立刻补跑一次）
   const reschedule = b.schedule !== undefined || b.tz !== undefined || (enabled === 1 && !job.enabled);
   const next = reschedule ? nextRunAt(schedule, offset, now, now) : job.next_run_at;
 
+  // key_id 不参与更新（恒为 NULL）；title 列已废弃，不再写入
   await env.DB.prepare(
-    `UPDATE jobs SET name=?, key_id=?, schedule=?, tz=?, title=?, body=?, enabled=?, next_run_at=?, updated_at=?
+    `UPDATE jobs SET name=?, schedule=?, tz=?, body=?, enabled=?, next_run_at=?, updated_at=?
       WHERE id=? AND user_id=?`
-  ).bind(name, keyId, schedule, tz, title, body, enabled, next, now, id, userId).run();
+  ).bind(name, schedule, tz, body, enabled, next, now, id, userId).run();
 
   return json({ ok: true, next_run_at: next, desc: describeSchedule(schedule, tz) });
 }

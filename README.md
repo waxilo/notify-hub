@@ -33,7 +33,7 @@ notify-hub/
 ├── worker/      # Cloudflare Worker 后端 + D1 schema
 │   ├── src/     # index.js(路由) auth.js keys.js notifications.js webhook.js utils.js
 │   │            # jobs.js(定时任务 CRUD+执行) schedule.js(预设串解析) deliver.js(投递公共函数) push.js(DO)
-│   ├── migrations/0001_init.sql  0002_schema_sync.sql  0003_jobs.sql
+│   ├── migrations/0001_init.sql  0002_schema_sync.sql  0003_jobs.sql  0004_jobs_detach_key.sql
 │   └── wrangler.toml
 ├── pages/       # Cloudflare Pages 静态控制台（仅配置，无构建）
 │   ├── index.html  styles.css  src/{config,api,app}.js
@@ -70,16 +70,17 @@ wrangler secret put JWT_SECRET
 > ⚠️ **wrangler v4 的 `d1 execute` 默认只操作本地库**，对线上库必须显式加 `--remote`。不加的话命令会"成功"但线上表根本没建，之后应用全部 500。
 
 ```bash
-# 分三个文件，按顺序执行（也可一条 npm run migrate:all 全跑）
+# 分四个文件，按顺序执行（也可一条 npm run migrate:all 全跑）
 npm run migrate        # 0001：基础三张表（users / keys / notifications）
 npm run migrate:sync   # 0002：补齐 0001 之后手工 ALTER 出来的字段（不幂等，列已存在会报 duplicate column）
 npm run migrate:jobs   # 0003：定时任务表 jobs + 扫描索引（幂等，可重复执行）
+npm run migrate:detach # 0004：清空 jobs.key_id —— 定时任务与外部 key 解耦（幂等，可重复执行）
 ```
 
 说明：
 
 - `0002_schema_sync.sql` 不幂等 —— SQLite 的 `ALTER TABLE ADD COLUMN` 没有 `IF NOT EXISTS`，且 `wrangler --file` 是**整批原子执行，一条失败全部回滚**。所以它和建表语句必须拆成两个文件，否则在已有库上会连带把建表也回滚掉。
-- 已经手工 ALTER 过的线上库**不需要**跑 `migrate:sync`，只跑 `migrate:jobs` 即可。
+- 已经手工 ALTER 过的线上库**不需要**跑 `migrate:sync`，只跑 `migrate:jobs` + `migrate:detach` 即可。
 - 本地调试把 `:remote` 换成 `--local`（如 `npm run migrate:jobs:local`）。
 
 ### 5. 部署
@@ -105,7 +106,7 @@ npm run deploy
    或在 `worker/` 下一键：`npm run deploy:pages`。
    也可在 Cloudflare Pages 控制台连接仓库、构建输出目录设为 `pages/`、无需构建命令。
 
-Web 控制台只做配置：**注册/登录 → 生成 Key（页面会给出完整 key 与 webhook 地址）→ 吊销 Key → 修改密码**。
+Web 控制台只做配置：**注册/登录 → 生成 Key（页面会给出完整 key 与 webhook 地址）→ 吊销 Key → 创建定时任务 → 修改密码**。
 
 ---
 
@@ -161,7 +162,7 @@ gh release download latest -p "*.apk"                 # 手动下载 APK
 | POST | `/api/notifications/:id/read` | 标记已读 | 是 |
 | DELETE | `/api/notifications/:id` | 删除通知 | 是 |
 | GET  | `/api/jobs` | 列出我的定时任务 | 是 |
-| POST | `/api/jobs` | 新建任务 `{name,key_id,schedule,tz,title,body,enabled}` | 是 |
+| POST | `/api/jobs` | 新建任务 `{name,schedule,tz,body,enabled}` | 是 |
 | PUT  | `/api/jobs/:id` | 修改任务（含启停，改计划会重算下次执行时刻） | 是 |
 | DELETE | `/api/jobs/:id` | 删除任务 | 是 |
 | GET/POST | `/hook/:key` | **通用 webhook**（无需鉴权） | 否 |
@@ -191,6 +192,7 @@ curl -X POST "https://notify-hub-worker.<sub>.workers.dev/hook/<KEY>" \
 |------|------|
 | 触发精度 | 0–1 分钟（每分钟扫描一次，只会延迟不会提前） |
 | 执行位置 | 服务端。App 离线、进程被杀、浏览器关闭都不影响触发 |
+| 通知来源 | **不挂 key**。Key 是外部系统调 `/hook/:key` 的凭证，定时任务是站内自己产生的提醒，两者互不相干 —— 建任务不需要先造通道。触发后直接发「默认类型」通知：标题 = 任务名称，正文 = 通知内容（留空则同任务名），通知的 `key_id` 为 NULL，因此不会出现在任何 key 的发送历史里 |
 | schedule 预设串 | `every:5m` / `every:2h` / `daily:09:00` / `weekly:1,09:00` / `once:2026-09-10T09:30` |
 | 时区 | **不对用户开放修改**：新建任务取设备/浏览器当前 UTC 偏移，编辑时沿用创建时的时区。存为固定偏移（`+08:00`），创建时即换算为 `next_run_at` 绝对时间戳 |
 | 防重 | `dedup_key = job:{id}:{计划时刻}`，5 分钟窗口内幂等；并发由 `next_run_at` 乐观锁兜底 |

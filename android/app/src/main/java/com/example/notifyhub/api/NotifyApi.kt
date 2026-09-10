@@ -51,10 +51,10 @@ data class NotificationItem(
 data class NotifResp(val notifications: List<NotificationItem>, val total: Int)
 
 // ---------- 定时任务（配置在服务端，由 Worker Cron 每分钟扫描执行，App 不跑任何定时器） ----------
+// 定时任务不挂 key：key 是外部系统调 /hook/:key 用的凭证。任务触发后直接发默认通知，
+// 标题 = 任务名称（服务端回填 title 字段），正文 = 通知内容（留空则同任务名）。
 data class JobItem(
     val id: Long,
-    @SerializedName("key_id") val keyId: Long?,
-    @SerializedName("key_name") val keyName: String?,
     val name: String?,
     val schedule: String,
     val tz: String?,
@@ -68,20 +68,16 @@ data class JobItem(
 )
 data class JobsResp(val jobs: List<JobItem>)
 data class CreateJobReq(
-    @SerializedName("key_id") val keyId: Long,
     val name: String,
     val schedule: String,
     val tz: String,
-    val title: String = "",
     val body: String = "",
     val enabled: Boolean = true
 )
 data class UpdateJobReq(
-    @SerializedName("key_id") val keyId: Long? = null,
     val name: String? = null,
     val schedule: String? = null,
     val tz: String? = null,
-    val title: String? = null,
     val body: String? = null,
     val enabled: Boolean? = null
 )

@@ -21,7 +21,6 @@ import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.CreateJobReq
 import com.example.notifyhub.api.JobItem
-import com.example.notifyhub.api.KeyItem
 import com.example.notifyhub.api.UpdateJobReq
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -33,10 +32,12 @@ import java.util.TimeZone
 
 // 定时任务列表：只做配置。执行完全在服务端（Worker Cron 每分钟扫描 jobs 表），
 // 所以 App 不需要 WorkManager / AlarmManager / 任何后台定时器，进程被杀、Doze、离线都不影响触发。
+//
+// 定时任务不挂 Key：Key 是外部系统调 /hook/:key 用的凭证，与站内定时提醒是两条独立来源。
+// 任务触发后直接发「默认类型」通知 —— 标题 = 任务名称，正文 = 通知内容（留空则同任务名）。
 class JobsActivity : AppCompatActivity() {
 
     private val jobs = mutableListOf<JobItem>()
-    private val keys = mutableListOf<KeyItem>()
     private lateinit var adapter: JobAdapter
     private val loading by lazy { LoadingOverlay(this) }
 
@@ -74,10 +75,9 @@ class JobsActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val api = Api.instance(this@JobsActivity)
-                val ks = Api.safe { api.listKeys() }.keys
+                // 定时任务不挂 key，所以只拉任务列表
                 val js = Api.safe { api.listJobs() }.jobs
                 withContext(Dispatchers.Main) {
-                    keys.clear(); keys.addAll(ks)
                     jobs.clear(); jobs.addAll(js)
                     adapter.notifyDataSetChanged()
                     loadedOnce = true
@@ -153,15 +153,10 @@ class JobsActivity : AppCompatActivity() {
 
     /* ---------- 新建 / 编辑 ---------- */
 
+    // 不需要先建 Key：任务直接发以任务名称为标题的默认通知
     private fun openEdit(job: JobItem?) {
-        if (keys.isEmpty()) {
-            toast("请先在首页创建一个通知通道，定时任务需要挂在通道下")
-            return
-        }
         val v = layoutInflater.inflate(R.layout.dialog_edit_job, null)
         val etName = v.findViewById<EditText>(R.id.etName)
-        val spKey = v.findViewById<Spinner>(R.id.spKey)
-        val etTitle = v.findViewById<EditText>(R.id.etTitle)
         val etBody = v.findViewById<EditText>(R.id.etBody)
         val spKind = v.findViewById<Spinner>(R.id.spKind)
         val llEvery = v.findViewById<View>(R.id.llEvery)
@@ -178,7 +173,6 @@ class JobsActivity : AppCompatActivity() {
         val spinnerAdapter = { arr: Array<String> ->
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, arr)
         }
-        spKey.adapter = spinnerAdapter(keys.map { it.name ?: "未命名" }.toTypedArray())
         spKind.adapter = spinnerAdapter(kindNames)
         spUnit.adapter = spinnerAdapter(unitNames)
         spDow.adapter = spinnerAdapter(dowNames)
@@ -193,7 +187,6 @@ class JobsActivity : AppCompatActivity() {
         val kindIdx = kindNames.indexOf(kindKey).let { if (it >= 0) it else 0 }
 
         etName.setText(job?.name ?: "")
-        etTitle.setText(job?.title ?: "")
         etBody.setText(job?.body ?: "")
         etEveryN.setText(sc.n)
         spUnit.setSelection(if (sc.u == "h") 1 else 0)
@@ -207,23 +200,6 @@ class JobsActivity : AppCompatActivity() {
         // 时区不可修改：新建任务取设备当前偏移，编辑已有任务沿用其创建时的时区 ——
         // 否则用户换了时区后再随手编辑一次，触发时刻会被静默平移。
         val tz = job?.tz ?: defaultTz()
-        val keyIdx = keys.indexOfFirst { it.id == job?.keyId }
-        if (keyIdx >= 0) spKey.setSelection(keyIdx)
-
-        // 高级设置默认收起，缩短表单。已填过标题或任务处于停用状态时自动展开，
-        // 避免用户以为原有配置丢了。
-        val tvAdvanced = v.findViewById<TextView>(R.id.tvAdvanced)
-        val llAdvanced = v.findViewById<View>(R.id.llAdvanced)
-        fun advLabel(open: Boolean) = (if (open) "▾ " else "▸ ") + "高级设置（通知标题 / 启停）"
-        if (!job?.title.isNullOrEmpty() || job?.enabled == 0) {
-            llAdvanced.visibility = View.VISIBLE
-        }
-        tvAdvanced.text = advLabel(llAdvanced.visibility == View.VISIBLE)
-        tvAdvanced.setOnClickListener {
-            val open = llAdvanced.visibility == View.VISIBLE
-            llAdvanced.visibility = if (open) View.GONE else View.VISIBLE
-            tvAdvanced.text = advLabel(!open)
-        }
 
         // 时区不可改，但要让用户知道「09:00」是按哪个时区算的（间隔型与绝对时刻无关，不提示）
         fun tzNote(k: Int): String {
@@ -265,14 +241,12 @@ class JobsActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 try {
                     val api = Api.instance(this@JobsActivity)
-                    val keyId = keys[spKey.selectedItemPosition].id
                     val res = if (job == null) {
                         Api.safe {
                             api.createJob(
                                 CreateJobReq(
-                                    keyId = keyId, name = name, schedule = schedule,
+                                    name = name, schedule = schedule,
                                     tz = tz,
-                                    title = etTitle.text.toString().trim(),
                                     body = etBody.text.toString(),
                                     enabled = cbEnabled.isChecked
                                 )
@@ -283,9 +257,8 @@ class JobsActivity : AppCompatActivity() {
                             api.updateJob(
                                 job.id,
                                 UpdateJobReq(
-                                    keyId = keyId, name = name, schedule = schedule,
+                                    name = name, schedule = schedule,
                                     tz = tz,
-                                    title = etTitle.text.toString().trim(),
                                     body = etBody.text.toString(),
                                     enabled = cbEnabled.isChecked
                                 )
@@ -382,7 +355,9 @@ class JobsActivity : AppCompatActivity() {
             h.tvSchedule.text = j.desc ?: j.schedule
             val nextText = if (on) (j.nextRunAt?.let { fmtAt(it, j.tz ?: "+08:00") } ?: "—") else "（已停用）"
             val lastText = j.lastRunAt?.let { fmtAt(it, j.tz ?: "+08:00") } ?: "从未执行"
-            h.tvMeta.text = "通道：${j.keyName ?: "(已删除)"}\n下次执行：$nextText · 上次执行：$lastText"
+            // 通知标题固定为任务名称，正文是通知内容（留空则同任务名），与外部 key 无关
+            val content = j.body?.takeIf { it.isNotBlank() } ?: "（与任务名称相同）"
+            h.tvMeta.text = "内容：$content\n下次执行：$nextText · 上次执行：$lastText"
             h.itemView.alpha = if (on) 1f else 0.62f
             h.btnToggle.text = if (on) "停用" else "启用"
             h.btnEdit.setOnClickListener { openEdit(j) }

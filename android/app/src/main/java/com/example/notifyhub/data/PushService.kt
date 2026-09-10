@@ -120,8 +120,9 @@ class PushService : Service() {
                         recentKeys.entries.removeAll { now - it.value > DEDUP_WINDOW_MS }
                         val dedupKey = obj.optString("dedup_key").ifEmpty { "id:${obj.optLong("id")}" }
                         if (recentKeys.put(dedupKey, now) != null) return
-                        // 通知标题 = key 名称；正文 = 消息内容。
-                        // 服务端标题已固定为 key 名（与 key_name 一致），不再拼进正文，避免出现两个相同标题
+                        // 通知标题：有 key 的通知（外部 webhook）用 key 名，没有 key 的（定时任务）
+                        // 用服务端下发的 title —— 它就是任务名称。正文 = 消息内容。
+                        // 服务端的 title 与 key 名一致时不会重复拼进正文。
                         val keyName = obj.optString("key_name")
                         val msgTitle = obj.optString("title")
                         val msgBody = obj.optString("body")

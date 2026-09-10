@@ -249,7 +249,7 @@ function openKeyCreate() {
   <div class="modal-mask">
     <div class="modal card">
       <h2>新建 Key</h2>
-      <p class="hint">每个 key 即一个独立消息通道，可随时编辑名称、启停与推送模式。</p>
+      <p class="hint">每个 key 是一份「外部写入凭证」：把它填进你的脚本 / CI / 监控的 webhook 地址即可推送通知。站内定时任务不需要 key。</p>
       <div id="create-body">
         <form id="create-form">
           <label>名称</label>
@@ -518,12 +518,12 @@ async function loadJobs() {
   const box = $('#job-list');
   if (!box) return;
   try {
-    const [{ jobs }, { keys }] = await Promise.all([api.listJobs(), api.listKeys()]);
+    // 定时任务不挂 key（key 是外部系统调 /hook/:key 用的），所以这里不需要拉 keys
+    const { jobs } = await api.listJobs();
     if (!jobs.length) {
       box.innerHTML = '<div class="empty">还没有定时任务，点击右上角「＋ 新建任务」创建第一个</div>';
       return;
     }
-    const keyName = (id) => (keys.find((k) => String(k.id) === String(id)) || {}).name || '(已删除)';
     box.innerHTML = `<div class="key-list">${jobs.map((j) => `
       <div class="key-row ${j.enabled ? '' : 'off'}">
         <div class="key-main">
@@ -532,8 +532,7 @@ async function loadJobs() {
           <span class="badge mode">${escapeHtml(j.desc || j.schedule)}</span>
         </div>
         <div class="key-sub">
-          <span class="hint">通道：${escapeHtml(keyName(j.key_id))}</span>
-          <span class="hint">标题：${escapeHtml(j.title || '(用通道名)')}</span>
+          <span class="hint">通知内容：${escapeHtml(j.body || '（与任务名称相同）')}</span>
         </div>
         <div class="key-sub">
           <span class="hint">下次执行：${j.enabled ? fmtTime(j.next_run_at) : '（已停用）'}</span>
@@ -560,18 +559,14 @@ async function loadJobs() {
 }
 
 // 新建 / 编辑弹窗（job 为空即新建）
-async function openJobEdit(job) {
-  const { keys } = await api.listKeys();
-  if (!keys.length) {
-    alert('请先在「Key 管理」创建一个通道，定时任务需要挂在一个通道下产生通知。');
-    return;
-  }
+// 定时任务不选通道：它不属于任何外部 key，直接发「默认类型」通知 —— 标题固定为任务名称。
+function openJobEdit(job) {
   const isNew = !job;
   const sc = splitSchedule(job && job.schedule);
   const tz = (job && job.tz) || localTz();
   const root_ = $('#modal-root');
-  // 已填过标题或处于停用状态时，直接展开高级设置，避免用户以为配置丢了
-  const needAdv = !!job && (!!job.title || !job.enabled);
+  // 处于停用状态时直接展开高级设置，避免用户以为配置丢了
+  const needAdv = !!job && !job.enabled;
 
   root_.innerHTML = `
   <div class="modal-mask">
@@ -580,11 +575,7 @@ async function openJobEdit(job) {
       <form id="job-form">
         <label>任务名称</label>
         <input name="name" value="${escapeHtml((job && job.name) || '')}" placeholder="如：每日签到提醒" required />
-
-        <label>通知通道</label>
-        <select name="key_id">
-          ${keys.map((k) => `<option value="${k.id}" ${job && String(job.key_id) === String(k.id) ? 'selected' : ''}>${escapeHtml(k.name)}</option>`).join('')}
-        </select>
+        <p class="hint xs" style="margin:6px 0 0">通知标题即任务名称，触发后直接推送到本账号的 App。</p>
 
         <label>重复方式</label>
         <select name="kind" id="job-kind">
@@ -620,14 +611,11 @@ async function openJobEdit(job) {
         <p class="hint xs" id="job-tz"></p>
 
         <label>通知内容</label>
-        <input name="body" value="${escapeHtml((job && job.body) || '')}" placeholder="留空则用任务名称" />
+        <input name="body" value="${escapeHtml((job && job.body) || '')}" placeholder="留空则与任务名称相同" />
 
         <details class="adv" ${needAdv ? 'open' : ''}>
-          <summary>高级设置（通知标题 / 启停）</summary>
+          <summary>高级设置（启停）</summary>
           <div class="adv-body">
-            <label>通知标题</label>
-            <input name="title" value="${escapeHtml((job && job.title) || '')}" placeholder="留空则用通道名称" />
-
             <label class="check-row"><input type="checkbox" name="enabled" ${!job || job.enabled ? 'checked' : ''}/> 启用此任务</label>
           </div>
         </details>
@@ -721,8 +709,6 @@ async function openJobEdit(job) {
     });
     const payload = {
       name: F.name.value.trim(),
-      key_id: Number(F.key_id.value),
-      title: F.title.value.trim(),
       body: F.body.value,
       schedule,
       tz,

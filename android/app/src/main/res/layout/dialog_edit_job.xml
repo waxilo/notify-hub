@@ -27,15 +27,10 @@
             android:layout_height="wrap_content" />
 
         <TextView
-            android:text="通知通道"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_secondary"
-            android:layout_marginTop="10dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-        <Spinner
-            android:id="@+id/spKey"
+            android:text="通知标题即任务名称，触发后直接推送到本账号"
+            android:textSize="11sp"
+            android:textColor="@color/text_muted"
+            android:layout_marginTop="4dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
@@ -149,42 +144,6 @@
             android:maxLines="3"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
-
-        <!-- 高级设置：默认收起，减少表单长度 -->
-        <TextView
-            android:id="@+id/tvAdvanced"
-            android:text="▸ 高级设置（通知标题 / 启停）"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_secondary"
-            android:paddingTop="10dp"
-            android:paddingBottom="6dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="?android:attr/selectableItemBackground"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <LinearLayout
-            android:id="@+id/llAdvanced"
-            android:orientation="vertical"
-            android:visibility="gone"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-
-            <TextView
-                android:text="通知标题（留空用通道名）"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="@color/text_secondary"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-            <EditText
-                android:id="@+id/etTitle"
-                android:inputType="text"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-        </LinearLayout>
 
         <TextView
             android:text="服务端每分钟扫描一次，实际触发比设定时刻晚 0–1 分钟"
