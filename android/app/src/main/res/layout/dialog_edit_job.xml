@@ -125,6 +125,16 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
+        <!-- 时区不可修改，只提示按哪个时区计算（间隔型与绝对时刻无关，由代码隐藏） -->
+        <TextView
+            android:id="@+id/tvTzNote"
+            android:textSize="11sp"
+            android:textColor="@color/text_muted"
+            android:visibility="gone"
+            android:layout_marginTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
         <TextView
             android:text="通知内容（留空用任务名）"
             android:textSize="12sp"
@@ -143,7 +153,7 @@
         <!-- 高级设置：默认收起，减少表单长度 -->
         <TextView
             android:id="@+id/tvAdvanced"
-            android:text="▸ 高级设置（通知标题 / 时区）"
+            android:text="▸ 高级设置（通知标题 / 启停）"
             android:textSize="13sp"
             android:textStyle="bold"
             android:textColor="@color/text_secondary"
@@ -172,19 +182,6 @@
             <EditText
                 android:id="@+id/etTitle"
                 android:inputType="text"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-
-            <TextView
-                android:text="时区"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="10dp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-            <Spinner
-                android:id="@+id/spTz"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
         </LinearLayout>

@@ -41,7 +41,6 @@ class JobsActivity : AppCompatActivity() {
     private val loading by lazy { LoadingOverlay(this) }
 
     private val dowNames = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
-    private val tzList = arrayOf("+08:00", "+09:00", "+07:00", "+05:30", "+00:00", "-05:00", "-08:00")
     private val kindNames = arrayOf("固定间隔", "每天", "每周", "一次性")
     private val unitNames = arrayOf("分钟", "小时")
 
@@ -170,7 +169,7 @@ class JobsActivity : AppCompatActivity() {
         val spDow = v.findViewById<Spinner>(R.id.spDow)
         val etWeekly = v.findViewById<EditText>(R.id.etWeeklyTime)
         val etOnce = v.findViewById<EditText>(R.id.etOnceAt)
-        val spTz = v.findViewById<Spinner>(R.id.spTz)
+        val tvTzNote = v.findViewById<TextView>(R.id.tvTzNote)
         val cbEnabled = v.findViewById<CheckBox>(R.id.cbEnabled)
 
         val spinnerAdapter = { arr: Array<String> ->
@@ -180,7 +179,6 @@ class JobsActivity : AppCompatActivity() {
         spKind.adapter = spinnerAdapter(kindNames)
         spUnit.adapter = spinnerAdapter(unitNames)
         spDow.adapter = spinnerAdapter(dowNames)
-        spTz.adapter = spinnerAdapter(tzList)
 
         val sc = splitSchedule(job?.schedule ?: "")
         val kindKey = when (sc.kind) {
@@ -203,17 +201,18 @@ class JobsActivity : AppCompatActivity() {
         cbEnabled.isChecked = job?.enabled != 0
         spKind.setSelection(kindIdx)
 
+        // 时区不可修改：新建任务取设备当前偏移，编辑已有任务沿用其创建时的时区 ——
+        // 否则用户换了时区后再随手编辑一次，触发时刻会被静默平移。
         val tz = job?.tz ?: defaultTz()
-        spTz.setSelection(tzList.indexOf(tz).let { if (it >= 0) it else 0 })
         val keyIdx = keys.indexOfFirst { it.id == job?.keyId }
         if (keyIdx >= 0) spKey.setSelection(keyIdx)
 
-        // 高级设置默认收起，缩短表单。已填过标题、改过时区，或任务处于停用状态时自动展开，
+        // 高级设置默认收起，缩短表单。已填过标题或任务处于停用状态时自动展开，
         // 避免用户以为原有配置丢了。
         val tvAdvanced = v.findViewById<TextView>(R.id.tvAdvanced)
         val llAdvanced = v.findViewById<View>(R.id.llAdvanced)
-        fun advLabel(open: Boolean) = (if (open) "▾ " else "▸ ") + "高级设置（通知标题 / 时区）"
-        if (!job?.title.isNullOrEmpty() || tz != defaultTz() || job?.enabled == 0) {
+        fun advLabel(open: Boolean) = (if (open) "▾ " else "▸ ") + "高级设置（通知标题 / 启停）"
+        if (!job?.title.isNullOrEmpty() || job?.enabled == 0) {
             llAdvanced.visibility = View.VISIBLE
         }
         tvAdvanced.text = advLabel(llAdvanced.visibility == View.VISIBLE)
@@ -223,12 +222,23 @@ class JobsActivity : AppCompatActivity() {
             tvAdvanced.text = advLabel(!open)
         }
 
+        // 时区不可改，但要让用户知道「09:00」是按哪个时区算的（间隔型与绝对时刻无关，不提示）
+        fun tzNote(k: Int): String {
+            if (k == 0) return ""
+            val local = defaultTz()
+            return if (tz == local) "按 UTC$tz 执行（设备时区）"
+            else "按 UTC$tz 执行（任务创建时的时区；设备现为 UTC$local）"
+        }
+
         val syncFields = {
             val k = spKind.selectedItemPosition
             llEvery.visibility = if (k == 0) View.VISIBLE else View.GONE
             etDaily.visibility = if (k == 1) View.VISIBLE else View.GONE
             llWeekly.visibility = if (k == 2) View.VISIBLE else View.GONE
             etOnce.visibility = if (k == 3) View.VISIBLE else View.GONE
+            val note = tzNote(k)
+            tvTzNote.text = note
+            tvTzNote.visibility = if (note.isEmpty()) View.GONE else View.VISIBLE
         }
         syncFields()
         spKind.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
@@ -258,7 +268,7 @@ class JobsActivity : AppCompatActivity() {
                             api.createJob(
                                 CreateJobReq(
                                     keyId = keyId, name = name, schedule = schedule,
-                                    tz = tzList[spTz.selectedItemPosition],
+                                    tz = tz,
                                     title = etTitle.text.toString().trim(),
                                     body = etBody.text.toString(),
                                     enabled = cbEnabled.isChecked
@@ -271,7 +281,7 @@ class JobsActivity : AppCompatActivity() {
                                 job.id,
                                 UpdateJobReq(
                                     keyId = keyId, name = name, schedule = schedule,
-                                    tz = tzList[spTz.selectedItemPosition],
+                                    tz = tz,
                                     title = etTitle.text.toString().trim(),
                                     body = etBody.text.toString(),
                                     enabled = cbEnabled.isChecked
@@ -281,7 +291,7 @@ class JobsActivity : AppCompatActivity() {
                     }
                     withContext(Dispatchers.Main) {
                         dialog.dismiss()
-                        res.nextRunAt?.let { toast("已保存，下次执行 ${fmtAt(it, tzList[spTz.selectedItemPosition])}") }
+                        res.nextRunAt?.let { toast("已保存，下次执行 ${fmtAt(it, tz)}") }
                         load()
                     }
                 } catch (e: Exception) {

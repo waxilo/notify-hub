@@ -458,13 +458,19 @@ function openKeyEdit(k) {
 /* ---------- 定时任务（配置在服务端，由 Cron 每分钟扫描执行） ---------- */
 
 const DOW_OPTS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-const TZ_OPTS = ['+08:00', '+09:00', '+07:00', '+05:30', '+00:00', '-05:00', '-08:00'];
 
-// 浏览器当前 UTC 偏移，作为新建任务的时区默认值
+// 时区不对用户开放修改：新建任务直接取浏览器当前 UTC 偏移（如 "+08:00"），
+// 编辑已有任务则沿用其创建时的时区 —— 否则用户换了时区再随手编辑一次，
+// 触发时刻会被静默平移，且很难察觉。
 function localTz() {
   const off = -new Date().getTimezoneOffset();
   const a = Math.abs(off);
   return `${off >= 0 ? '+' : '-'}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`;
+}
+
+// "+08:00" → "UTC+08:00"
+function tzLabel(tz) {
+  return tz ? `UTC${tz}` : 'UTC';
 }
 
 function fmtTime(ms) {
@@ -564,8 +570,8 @@ async function openJobEdit(job) {
   const sc = splitSchedule(job && job.schedule);
   const tz = (job && job.tz) || localTz();
   const root_ = $('#modal-root');
-  // 已填过标题、改过时区或处于停用状态时，直接展开高级设置，避免用户以为配置丢了
-  const needAdv = !!job && (!!job.title || job.tz !== localTz() || !job.enabled);
+  // 已填过标题或处于停用状态时，直接展开高级设置，避免用户以为配置丢了
+  const needAdv = !!job && (!!job.title || !job.enabled);
 
   root_.innerHTML = `
   <div class="modal-mask">
@@ -611,20 +617,16 @@ async function openJobEdit(job) {
           <input name="at" type="datetime-local" value="${escapeHtml(sc.kind === 'once' ? sc.at : '')}" aria-label="触发时刻" />
         </div>
         <p class="job-preview" id="job-preview"></p>
+        <p class="hint xs" id="job-tz"></p>
 
         <label>通知内容</label>
         <input name="body" value="${escapeHtml((job && job.body) || '')}" placeholder="留空则用任务名称" />
 
         <details class="adv" ${needAdv ? 'open' : ''}>
-          <summary>高级设置（通知标题 / 时区 / 启停）</summary>
+          <summary>高级设置（通知标题 / 启停）</summary>
           <div class="adv-body">
             <label>通知标题</label>
             <input name="title" value="${escapeHtml((job && job.title) || '')}" placeholder="留空则用通道名称" />
-
-            <label>时区</label>
-            <select name="tz">
-              ${TZ_OPTS.map((t) => `<option value="${t}" ${t === tz ? 'selected' : ''}>UTC${t}${t === '+08:00' ? '（北京时间）' : ''}</option>`).join('')}
-            </select>
 
             <label class="check-row"><input type="checkbox" name="enabled" ${!job || job.enabled ? 'checked' : ''}/> 启用此任务</label>
           </div>
@@ -666,11 +668,26 @@ async function openJobEdit(job) {
     return F.at.value ? `→ 仅在 ${F.at.value.replace('T', ' ')} 触发一次，触发后自动停用` : '→ 请选择触发时间';
   };
 
+  // 时区不可改，但必须让用户知道「09:00」是按哪个时区算的（间隔型与绝对时刻无关，不显示）
+  const tzNote = (k) => {
+    if (k === 'every') return '';
+    const local = localTz();
+    return tz === local
+      ? `按 ${tzLabel(tz)} 执行（本机时区）`
+      : `按 ${tzLabel(tz)} 执行（任务创建时的时区；本机现为 ${tzLabel(local)}）`;
+  };
+
   const syncFields = () => {
     const k = F.kind.value;
     form.querySelectorAll('.job-fields').forEach((d) => { d.hidden = d.dataset.f !== k; });
     const p = $('#job-preview');
     if (p) p.textContent = preview(k);
+    const tzEl = $('#job-tz');
+    if (tzEl) {
+      const t = tzNote(k);
+      tzEl.textContent = t;
+      tzEl.hidden = !t;
+    }
   };
   form.kind.onchange = syncFields;
   form.addEventListener('input', syncFields);
@@ -708,7 +725,7 @@ async function openJobEdit(job) {
       title: F.title.value.trim(),
       body: F.body.value,
       schedule,
-      tz: F.tz.value,
+      tz,
       enabled: F.enabled.checked,
     };
     try {
