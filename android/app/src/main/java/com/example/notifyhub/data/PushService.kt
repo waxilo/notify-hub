@@ -1,5 +1,6 @@
 package com.example.notifyhub.data
 
+import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -10,15 +11,19 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import android.view.View
+import android.view.WindowManager
 import com.example.notifyhub.LogHelper
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.ui.AlarmActivity
@@ -42,7 +47,7 @@ import java.util.concurrent.TimeUnit
 // 震动在这里只是「马达直调」，不受锁屏/亮屏、静音模式、勿扰策略影响。
 //
 // 全屏告警页走两条并行通道：① 通知的 fullScreenIntent（请系统代为启动，由系统判定是否放行）；
-// ② 拿到悬浮窗权限后本服务直接 startActivity（见 tryLaunchAlarmDirectly）。
+// ② 拿到悬浮窗权限后本服务自己把告警页拉起来（见 tryLaunchAlarmDirectly）。
 // 只留 ① 的话，ROM 的 BAL / 「后台弹出界面」闸门会让息屏场景退化成「只有横幅」。
 class PushService : Service() {
 
@@ -66,6 +71,12 @@ class PushService : Service() {
     private var strongMsgId = 0L
     private var strongTitle: String? = null
     private var strongBody: String = ""
+
+    // ---------- 直拉告警页（第二条通道）的状态 ----------
+    // 让应用「具有可见窗口」的 1×1 透明悬浮窗，用完即撤（见 showLaunchOverlay）
+    private var launchOverlay: View? = null
+    // 直拉后的复核任务：判断这次到底有没有被系统放行
+    private var pendingVerify: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -135,6 +146,8 @@ class PushService : Service() {
         handler.removeCallbacksAndMessages(null)
         // 服务没了震动必须停：留着一个没人能取消的震动比不震更糟
         stopStrongVibrate()
+        // 悬浮窗也必须撤：服务被清掉后没人再来回收它
+        hideLaunchOverlay()
         stopReceiver?.let {
             try { unregisterReceiver(it) } catch (_: Exception) {}
         }
@@ -327,22 +340,32 @@ class PushService : Service() {
 
     // ---------- 通知 ----------
 
-    // 兜底通道：不依赖系统 FSI，自己把告警页拉到最前。
+    // 兜底通道：不依赖系统 FSI，自己把告警页拉到锁屏之上。
     //
-    // 为什么需要它：FSI 是「请系统代为启动 Activity」，而系统在启动前还要过一道更外面的闸门 ——
-    // Android 10+ 的**后台启动 Activity 限制**（BAL）。官方给系统闹钟/通话类应用留了白名单，
-    // 第三方应用不在其中；国产 ROM（小米/华为等）还额外加了「后台弹出界面」开关，默认关闭。
-    // 结果就是：权限、渠道、锁屏状态三项全绿，息屏时依然只有横幅。
+    // 为什么需要它：FSI 是「请系统代为启动 Activity」，而系统在代为启动前还要过一道更外面的
+    // 闸门 —— Android 10+ 的**后台启动 Activity 限制**（BAL）。官方例外清单里，我们能自己
+    // 争取的有两条：
+    //   ① 应用已获得 SYSTEM_ALERT_WINDOW（悬浮窗）权限
+    //   ② 应用具有可见窗口
+    // 关键点：只满足 ① 往往不够。Android 15 起对 SAW 的收紧正是要求「持权限**且**存在可见的
+    // overlay 窗口」；部分 ROM 的实现也按「有可见窗口」判定。而后台服务本身**没有任何窗口** ——
+    // 这就是「权限全绿、依然只剩横幅」的最后一环。
+    // 所以这里两步都做：先挂一个 1×1 透明悬浮窗把 ② 补上，再启动告警页。
     //
-    // SYSTEM_ALERT_WINDOW（显示在其他应用上层）是 BAL 的**硬豁免**之一：拿到它，普通应用
-    // 也能从后台启动自己的 Activity，锁屏下同样生效（AlarmActivity 自带 showWhenLocked/
-    // turnScreenOn，会点亮屏幕并盖在锁屏之上）。
+    // 启动方式用 PendingIntent 而非裸 startActivity：Android 14 起系统不再默认给 PendingIntent
+    // 授予 BAL 特权，必须显式声明 MODE_BACKGROUND_ACTIVITY_START_ALLOWED —— 这是官方为
+    // 「后台启动 Activity」留的正规口子，比依赖隐式豁免更明确。
     //
     // 与 FSI 并行而非二选一：系统放行哪条就走哪条，两条都到也无害 —— AlarmActivity 是
     // singleInstance，只会有一个实例，第二次进入走 onNewIntent 刷新内容。
-    // 未获权限时 startActivity 会被系统静默拦截（不抛异常、不崩溃），所以这里可以无条件尝试。
     private fun tryLaunchAlarmDirectly(id: Long, notifId: Int, title: String, body: String) {
+        // WindowManager.addView 必须在有 Looper 的线程上执行，而本方法由 WS 回调（OkHttp 线程）调用
+        handler.post { launchAlarmOnMain(id, notifId, title, body) }
+    }
+
+    private fun launchAlarmOnMain(id: Long, notifId: Int, title: String, body: String) {
         if (!Settings.canDrawOverlays(this)) {
+            recordLaunchResult("未尝试：悬浮窗权限未开启，只剩系统全屏通知一条通道")
             LogHelper.append(this, "direct launch skipped: no overlay permission id=$id")
             return
         }
@@ -355,20 +378,117 @@ class PushService : Service() {
             (getSystemService(KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
         }.getOrDefault(false)
         if (screenOn && !locked) {
+            recordLaunchResult("未尝试：屏幕亮且已解锁，按设计只给横幅（点横幅可进告警页）")
             LogHelper.append(this, "direct launch skipped: interactive & unlocked id=$id")
             return
         }
-        try {
-            startActivity(
-                Intent(this, AlarmActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                    .putExtra(AlarmActivity.EXTRA_TITLE, title)
-                    .putExtra(AlarmActivity.EXTRA_BODY, body)
-                    .putExtra(AlarmActivity.EXTRA_NOTIF_ID, notifId)
+
+        val overlay = showLaunchOverlay(id)
+        val t0 = SystemClock.elapsedRealtime()
+        val sent = sendAlarmIntent(notifId, title, body)
+        LogHelper.append(
+            this,
+            "direct launch attempt id=$id (screenOn=$screenOn locked=$locked overlay=${overlay != null} sent=$sent)"
+        )
+
+        // 被 BAL 拦下时系统是**静默丢弃**（不抛异常、不回调），所以判断成败不能看返回值，
+        // 只能过一小会儿看 AlarmActivity 有没有真的 onCreate。结论落到 SharedPreferences，
+        // 设置页直接读出来 —— 用户不必抓日志就知道卡在哪一层。
+        pendingVerify?.let { handler.removeCallbacks(it) }
+        val verify = Runnable {
+            hideLaunchOverlay()
+            val ok = alarmStartedAt >= t0
+            recordLaunchResult(
+                when {
+                    ok -> "成功：全屏告警页已弹出"
+                    !sent -> "失败：启动调用抛异常，详见诊断日志"
+                    else -> "失败：启动被系统拦截（只剩横幅）—— 多为厂商「后台弹出界面」未允许"
+                }
             )
-            LogHelper.append(this, "direct launch alarm activity id=$id (screenOn=$screenOn locked=$locked)")
+            LogHelper.append(
+                this,
+                "direct launch verify id=$id -> ${if (ok) "alarm activity started" else "blocked by system"}"
+            )
+        }
+        pendingVerify = verify
+        handler.postDelayed(verify, LAUNCH_VERIFY_MS)
+    }
+
+    // 1×1 全透明、不抢焦点、不接收触摸的悬浮窗。用户看不见它，唯一作用是让本应用
+    // 「具有可见窗口」—— 官方 BAL 例外清单里的独立一条，也是 Android 15 起 SAW 豁免
+    // 收紧后额外要求的条件。必须等告警页拉起之后再回收，否则判定当场失效。
+    @Suppress("DEPRECATION")
+    private fun showLaunchOverlay(id: Long): View? {
+        hideLaunchOverlay()
+        return try {
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+            val v = View(this)
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE
+            wm.addView(
+                v,
+                WindowManager.LayoutParams(
+                    1, 1, type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT
+                )
+            )
+            launchOverlay = v
+            v
         } catch (e: Exception) {
-            LogHelper.append(this, "direct launch failed: ${e.javaClass.simpleName}: ${e.message}")
+            // 挂不上不致命：FSI 通道仍在，只是少了一重豁免
+            LogHelper.append(this, "launch overlay failed: ${e.javaClass.simpleName}: ${e.message} id=$id")
+            null
+        }
+    }
+
+    private fun hideLaunchOverlay() {
+        val v = launchOverlay ?: return
+        launchOverlay = null
+        runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) }
+    }
+
+    // 返回值只表示「调用有没有抛异常」，**不代表 Activity 真的起来了** ——
+    // 被 BAL 拦截时系统静默丢弃，既不抛异常也不回调，只能靠 launchAlarmOnMain 里的复核判断。
+    private fun sendAlarmIntent(notifId: Int, title: String, body: String): Boolean {
+        val i = Intent(this, AlarmActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(AlarmActivity.EXTRA_TITLE, title)
+            .putExtra(AlarmActivity.EXTRA_BODY, body)
+            .putExtra(AlarmActivity.EXTRA_NOTIF_ID, notifId)
+        return try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                // Android 14 起 PendingIntent 不再默认携带 BAL 特权，须显式 opt-in
+                val options = ActivityOptions.makeBasic()
+                    .setPendingIntentBackgroundActivityStartMode(
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                    )
+                    .toBundle()
+                PendingIntent.getActivity(
+                    this, RC_ALARM_DIRECT, i,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    options
+                ).send()
+            } else {
+                startActivity(i)
+            }
+            true
+        } catch (e: Exception) {
+            LogHelper.append(this, "send alarm intent failed: ${e.javaClass.simpleName}: ${e.message}")
+            false
+        }
+    }
+
+    private fun recordLaunchResult(result: String) {
+        runCatching {
+            getSharedPreferences(PREFS_STATE, MODE_PRIVATE).edit()
+                .putString(KEY_LAST_LAUNCH, result)
+                .putLong(KEY_LAST_LAUNCH_TS, System.currentTimeMillis())
+                .apply()
         }
     }
 
@@ -449,8 +569,9 @@ class PushService : Service() {
         }.getOrDefault(true)
         LogHelper.append(
             this,
-            "fsi facts: fsiPerm=${canUseFullScreenIntent(this)} channelImportance=${pushChannelImportance(this)} " +
-                "notifEnabled=${nm.areNotificationsEnabled()} overlayPerm=${canDrawOverlays(this)} screenOn=$screenOn"
+            "fsi facts: sdk=${Build.VERSION.SDK_INT} fsiPerm=${canUseFullScreenIntent(this)} " +
+                "channelImportance=${pushChannelImportance(this)} notifEnabled=${nm.areNotificationsEnabled()} " +
+                "overlayPerm=${canDrawOverlays(this)} screenOn=$screenOn"
         )
     }
 
@@ -612,5 +733,27 @@ class PushService : Service() {
                 (ctx.getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                     .getNotificationChannel(PUSH_CHANNEL_ID)?.importance ?: -1
             }.getOrDefault(-1)
+
+        // ---- 直拉告警页（第二条通道）----
+        private const val RC_ALARM_DIRECT = 900_001
+        // 启动后等待 Activity onCreate 的复核窗口：太短会误判失败，太长会把悬浮窗挂得过久
+        private const val LAUNCH_VERIFY_MS = 2500L
+
+        // AlarmActivity.onCreate 时写入（elapsedRealtime，单调时钟，不受系统时间调整影响）。
+        // 直拉是否真被系统放行，就看它有没有在这次尝试之后更新 —— 被 BAL 拦截时
+        // startActivity 是静默丢弃的，没有任何其他信号可用。
+        @Volatile
+        var alarmStartedAt = 0L
+
+        // 上一次强力提醒的投递结论。设置页直接读这一项，用户不必去翻日志文件。
+        const val PREFS_STATE = "notify_hub_state"
+        const val KEY_LAST_LAUNCH = "last_launch_result"
+        const val KEY_LAST_LAUNCH_TS = "last_launch_ts"
+
+        fun lastLaunchResult(ctx: Context): Pair<String, Long>? {
+            val p = ctx.getSharedPreferences(PREFS_STATE, Context.MODE_PRIVATE)
+            val s = p.getString(KEY_LAST_LAUNCH, null) ?: return null
+            return s to p.getLong(KEY_LAST_LAUNCH_TS, 0L)
+        }
     }
 }

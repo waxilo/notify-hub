@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
@@ -64,6 +65,9 @@ class AlarmActivity : AppCompatActivity() {
         }
 
         bind(intent)
+        // 上报启动时刻：PushService 的直拉复核据此判断这一次到底有没有被系统静默拦下
+        // （被 BAL 拦截时 startActivity 既不抛异常也不回调，只有这个信号能证明页面真的起来了）
+        PushService.alarmStartedAt = SystemClock.elapsedRealtime()
         LogHelper.append(this, "AlarmActivity onCreate")
     }
 

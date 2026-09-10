@@ -1290,3 +1290,74 @@ App 诊断日志写在 `下载/NotifyHub/notify-hub.log`。收到一条强震消
 4. `logFsiFacts()` 增加 `overlayPerm=` 一项。新的自证方式：`strong vibrate start` 之后若既无 `AlarmActivity onCreate` 也无 `direct launch alarm activity`，才说明两条通道都被拦了。
 
 **验证顺序**（真机）：设置页 → 开启悬浮窗权限 → 息屏触发 Test job → 观察是否直接弹出全屏告警页；对照日志确认走的是 `direct launch alarm activity` 还是 FSI。
+
+## 23. 开了悬浮窗权限仍未全屏：补齐「可见窗口」例外（2026-09-10）
+
+### 23.1 现象
+
+第 22 章上线后，用户在设置页开启「悬浮窗权限」，息屏触发 Test job，仍然只有横幅 + 震动。
+
+### 23.2 查证：BAL 的例外清单里，SAW 不是唯一条件
+
+官方《活动安全性》文档（`developer.android.com/guide/components/activities/secure-bal`）列出了
+「应用可以从后台启动 activity」的全部例外，其中**两条是我们能自己争取的**：
+
+1. **应用具有可见窗口**（例如前台有 Activity）；
+2. 应用已获得用户授予的 **SYSTEM_ALERT_WINDOW** 权限。
+
+真正的缺口在第 1 条：第 22 章的实现只满足了第 2 条。而后台 Service **本身没有任何窗口**。
+
+Android 15 的行为变更印证了这个方向 —— 文件 `about/versions/15/behavior-changes-15` 中
+「Restrictions on starting foreground services while an app holds the SYSTEM_ALERT_WINDOW
+permission」一段：
+
+> If an app targets Android 15, this exemption is now narrower. The app now needs to have the
+> SYSTEM_ALERT_WINDOW permission **and also have a visible overlay window**. That is, the app needs
+> to first launch a `TYPE_APPLICATION_OVERLAY` window and the window needs to be visible before you
+> start a foreground service.
+
+该变更原文针对「启动前台服务」，但它明确了 Google 对 SAW 豁免的收紧方向：
+**光有权限不够，必须真的存在一个可见的 overlay 窗口。** 部分 ROM 的后台启动判定同样按
+「有可见窗口」这一条走。
+
+此外，Android 14 起 **PendingIntent 不再默认携带 BAL 特权**，须由发送方显式 opt-in：
+
+> 如需选择启用，应用应将包含 `setPendingIntentBackgroundActivityStartMode(
+> ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)` 的 ActivityOptions 软件包
+> 传递给 `PendingIntent.send()` 或类似方法。
+
+### 23.3 修复
+
+| 项 | 改动 |
+|---|---|
+| 补「可见窗口」 | `PushService.showLaunchOverlay()`：直拉前先挂一个 **1×1 全透明 `TYPE_APPLICATION_OVERLAY`** 悬浮窗（不可触摸、不抢焦点），拉起告警页后再回收 |
+| 显式 opt-in | `PushService.sendAlarmIntent()`：Android 14+ 走 `PendingIntent` + `MODE_BACKGROUND_ACTIVITY_START_ALLOWED`；低版本仍用 `startActivity` |
+| 线程约束 | `WindowManager.addView` 要求有 Looper，而 WS 回调跑在 OkHttp 线程上 —— `tryLaunchAlarmDirectly` 改为 `handler.post` 到主线程再执行 |
+| 资源回收 | `onDestroy` 补 `hideLaunchOverlay()`；连续多条消息时，新一次直拉会先撤掉旧窗口 |
+
+### 23.4 诊断回路：不再依赖用户抓日志
+
+`startActivity` 被 BAL 拦截时是**静默丢弃**（不抛异常、不回调），返回值毫无意义。
+因此改为**事后复核**：
+
+- `AlarmActivity.onCreate` 写入 `PushService.alarmStartedAt`（`elapsedRealtime`，单调时钟）；
+- `launchAlarmOnMain` 在启动后 2.5 秒比对时间戳，把结论写入 `SharedPreferences`；
+- **设置页「提醒权限」卡片直接显示这一条**，四类结论各自对应一个明确的断点：
+
+| 显示 | 含义 | 下一步 |
+|---|---|---|
+| 未尝试：悬浮窗权限未开启 | 权限没真正授予（或开成了厂商的「后台弹出界面」） | 重新到系统设置授权 |
+| 未尝试：屏幕亮且已解锁 | 设计行为，此时只用横幅 | 息屏/锁屏后再测 |
+| 成功：全屏告警页已弹出 | 通道 ② 生效 | — |
+| 失败：启动被系统拦截 | 厂商「后台弹出界面」未允许 | 到应用信息里打开该开关 |
+
+日志同步新增 `direct launch attempt ... overlay= sent=` 与
+`direct launch verify ... -> blocked by system`。
+
+### 23.5 仍需确认
+
+- 用户手上的 APK 是否已包含第 22 章的直拉逻辑（`v1.0.63` 起才有）。
+- 厂商「后台弹出界面」是否已允许（小米/华为等独立开关，默认关闭，且会同时废掉两条通道）。
+- 若两者都满足仍失败，则回到「震动 + 横幅」这一形态 —— 震动不受 BAL 影响，
+  本来就是最可靠的叫醒手段。
+

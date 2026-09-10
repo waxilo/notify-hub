@@ -22,6 +22,9 @@ import com.example.notifyhub.data.UpdateChecker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -184,6 +187,28 @@ class SettingsActivity : AppCompatActivity() {
                 tvCh.setTextColor(0xFF17994F.toInt())
                 btnCh.visibility = View.GONE
             }
+        }
+
+        // 上次强力提醒的实际投递结论。被系统拦下时 startActivity 是静默丢弃（不抛异常、
+        // 不回调），只能靠事后复核判断 —— 把结论摆在这里，用户不必翻日志就知道卡在哪一层。
+        val tvLast = findViewById<TextView>(R.id.tvLastLaunch)
+        val last = PushService.lastLaunchResult(this)
+        if (last == null) {
+            tvLast.text = "上次强力提醒：暂无记录 —— 发送一条带强力震动的推送后，这里会显示它有没有弹出全屏页"
+            tvLast.setTextColor(0xFF8A93A6.toInt())
+        } else {
+            val (result, ts) = last
+            val time = if (ts > 0)
+                SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date(ts))
+            else "未知时间"
+            tvLast.text = "上次强力提醒（$time）：$result"
+            tvLast.setTextColor(
+                when {
+                    result.startsWith("成功") -> 0xFF17994F.toInt()
+                    result.startsWith("失败") -> 0xFFE5484D.toInt()
+                    else -> 0xFFC07F00.toInt()
+                }
+            )
         }
     }
 
