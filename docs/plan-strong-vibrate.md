@@ -1549,3 +1549,54 @@ BAL 与「后台弹出界面」都管辖不到它，只需要悬浮窗权限 —
 主动删掉「全屏」「悬浮窗」「后台弹出界面」等已不再适用的话术 —— 保留一个做不到的承诺，
 比不承诺更糟。
 
+---
+
+## 27. 移除后全项目复查（2026-09-10）
+
+结论：**全屏相关代码已移除干净，无残留引用、无孤立资源、无断裂链路。**
+以下为逐项核查方法与结果，可复现。
+
+### 27.1 符号残留
+
+| 检查项 | 方法 | 结果 |
+|---|---|---|
+| 源码关键字 | 全仓 grep `AlarmActivity` / `activity_alarm` / `fullScreenIntent` / `Overlay` / `悬浮窗` / `全屏` / `后台弹出`（限 `*.kt/xml/js/html/gradle/toml`） | 仅命中「无关词」与「刻意保留的说明注释」（见 27.4） |
+| 文件是否真删 | 按路径探测 | `ui/AlarmActivity.kt`、`res/layout/activity_alarm.xml` 均不存在 |
+| Manifest | 列出全部 `uses-permission` 与组件 | 7 项权限（INTERNET / POST_NOTIFICATIONS / FOREGROUND_SERVICE / FOREGROUND_SERVICE_DATA_SYNC / REQUEST_INSTALL_PACKAGES / VIBRATE / WRITE_EXTERNAL_STORAGE）；5 个 Activity（Login/Keys/Settings/Jobs/History）+ FileProvider + PushService。**无** `USE_FULL_SCREEN_INTENT` / `SYSTEM_ALERT_WINDOW` / `WAKE_LOCK`，无告警页声明 |
+| 布局控件 | 导出 `activity_settings.xml` 全部 `@+id` | 12 个 id，**无** `tvFsiStatus` / `btnFsiSetting` / `tvOverlayStatus` / `btnOverlaySetting` / `tvLastLaunch` |
+| Kotlin 常量 | 复核 `PushService.companion object` | 只剩 `DELETE_REQUEST_OFFSET`；`FS_REQUEST_OFFSET` 与 `EXTRA_NOTIF_ID` 已删 |
+
+### 27.2 资源孤立性
+
+删掉的 `activity_alarm.xml` 只用过 `@color/bg` / `card` / `text_main` / `text_secondary` ——
+四处**都仍被其他布局引用**，因此本次移除**没有孤立任何资源**。
+
+（另发现 `colors.xml` 中 `ok` / `warn` / `warn_bg` / `danger_bg` 从未被 `@color/` 引用。
+`git log -S"@color/warn"` 无任何命中，证明其为**既存**现象，与本次移除无关：原因是
+`SettingsActivity` 等直接把色值写成 `0xFFC07F00.toInt()`，未使用 `@color/` 引用。）
+
+### 27.3 链路与语法
+
+- **停震链路完整**：`PushService` 写入 `EXTRA_STOP_VIBRATE=vibrate` → `KeysActivity.handleStopVibrate()`
+  取出并 `removeExtra` → 发 `ACTION_STOP_VIBRATE` 广播 → `PushService` 停震。普通消息带 `false`，
+  不会误停他条。
+- **通知构建**：`buildMessageNotification` 中已无 `setFullScreenIntent` / `addAction` / `EXTRA_NOTIF_ID`；
+  `CATEGORY_MESSAGE` + `VISIBILITY_PUBLIC`；`deleteIntent` 仅在 `vibrate=true` 时挂。
+- 全部 Kotlin 文件括号平衡；全部 XML 通过 `xml.dom.minidom` 解析。
+- **未使用 import：0 处**（此前 `UpdateChecker.kt` 残留一个 `android.app.PendingIntent`，已清）。
+
+### 27.4 刻意保留的两处「命中」
+
+| 位置 | 内容 | 为何保留 |
+|---|---|---|
+| `PushService.kt` 顶部注释 | 「不做全屏告警页」及其原因（BAL + 厂商「后台弹出界面」） | 防止后人重新踩同一个坑，是**决策依据的留档**而非死代码 |
+| `pages/src/app.js` | `悬浮面板`（hover 面板）、`服务器告警`（示例文案） | 与通知提醒无关的同形词 |
+
+### 27.5 工具教训（重要）
+
+macOS 自带 **BSD `grep` 不支持 `\b` 词边界**：`grep -E "\bView\b"` 会静默返回空，
+据此会误判「import 未使用」。本次核查中 `SettingsActivity.kt` 的 `import android.view.View`
+差点因此被误删 —— 它实际被第 137/142/147/152 行的 `View.GONE` / `View.VISIBLE` 使用。
+
+**判定未使用符号必须用 Python `re`（支持 `\b`）或 `grep -w`，不要用 BSD grep 的 `\b`。**
+
