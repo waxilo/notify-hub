@@ -32,7 +32,8 @@
 notify-hub/
 ├── worker/      # Cloudflare Worker 后端 + D1 schema
 │   ├── src/     # index.js(路由) auth.js keys.js notifications.js webhook.js utils.js
-│   ├── migrations/0001_init.sql
+│   │            # jobs.js(定时任务 CRUD+执行) schedule.js(预设串解析) deliver.js(投递公共函数) push.js(DO)
+│   ├── migrations/0001_init.sql  0002_jobs.sql
 │   └── wrangler.toml
 ├── pages/       # Cloudflare Pages 静态控制台（仅配置，无构建）
 │   ├── index.html  styles.css  src/{config,api,app}.js
@@ -67,6 +68,8 @@ wrangler secret put JWT_SECRET
 ### 4. 初始化表
 ```bash
 wrangler d1 execute notify-hub --file=./migrations/0001_init.sql
+# 定时任务表 + 补齐 0001 之后新增的字段（首次部署或升级必跑，重复执行会报 duplicate column，属预期）
+wrangler d1 execute notify-hub --file=./migrations/0002_jobs.sql
 # 本地调试：加 --local
 ```
 
@@ -120,6 +123,10 @@ Web 控制台只做配置：**注册/登录 → 生成 Key（页面会给出完�
 | GET  | `/api/notifications?limit=50` | 拉取通知 | 是 |
 | POST | `/api/notifications/:id/read` | 标记已读 | 是 |
 | DELETE | `/api/notifications/:id` | 删除通知 | 是 |
+| GET  | `/api/jobs` | 列出我的定时任务 | 是 |
+| POST | `/api/jobs` | 新建任务 `{name,key_id,schedule,tz,title,body,enabled}` | 是 |
+| PUT  | `/api/jobs/:id` | 修改任务（含启停，改计划会重算下次执行时刻） | 是 |
+| DELETE | `/api/jobs/:id` | 删除任务 | 是 |
 | GET/POST | `/hook/:key` | **通用 webhook**（无需鉴权） | 否 |
 
 ### Webhook 用法示例
@@ -135,6 +142,34 @@ curl -X POST "https://notify-hub-worker.<sub>.workers.dev/hook/<KEY>" \
 
 # POST 表单 / 纯文本同样支持，body 取 message/body/text 字段
 ```
+
+---
+
+## 四、定时任务（分钟级）
+
+服务端持有配置与执行权：Worker 的 Cron Trigger 每分钟唤醒一次，扫描 `jobs` 表执行到期任务，
+写通知后走既有的 Durable Object → WebSocket 链路推送给 App。**端侧（Web / App）只做配置，不跑任何定时器。**
+
+| 项目 | 说明 |
+|------|------|
+| 触发精度 | 0–1 分钟（每分钟扫描一次，只会延迟不会提前） |
+| 执行位置 | 服务端。App 离线、进程被杀、浏览器关闭都不影响触发 |
+| schedule 预设串 | `every:5m` / `every:2h` / `daily:09:00` / `weekly:1,09:00` / `once:2026-09-10T09:30` |
+| 时区 | 固定 UTC 偏移（`+08:00`），创建时即换算为 `next_run_at` 绝对时间戳 |
+| 防重 | `dedup_key = job:{id}:{计划时刻}`，5 分钟窗口内幂等；并发由 `next_run_at` 乐观锁兜底 |
+| 停机补偿 | **不补触发**：长时间不可用后恢复，直接跳到下一个未来时刻 |
+| 额度占用 | 1 个 cron trigger；每分钟 1 次 Worker 请求（1440/天 ≈ 1.44%） |
+
+调试（本地 `wrangler dev` 默认不会自动跑 cron，必须加 `--test-scheduled`）：
+
+```bash
+cd worker
+npm run dev:cron                                   # = wrangler dev --test-scheduled
+curl "http://localhost:8787/__scheduled"           # 手动触发一次扫描
+npm test                                           # 调度算法 + 端到端冒烟测试（内存 SQLite）
+```
+
+> Cron 执行失败不会重试也不会告警，所以列表里展示了「上次执行」时间 —— 扫一眼就能发现任务是否悄悄停了。
 
 ---
 

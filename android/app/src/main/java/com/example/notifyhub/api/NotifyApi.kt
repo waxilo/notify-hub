@@ -50,6 +50,43 @@ data class NotificationItem(
 )
 data class NotifResp(val notifications: List<NotificationItem>, val total: Int)
 
+// ---------- 定时任务（配置在服务端，由 Worker Cron 每分钟扫描执行，App 不跑任何定时器） ----------
+data class JobItem(
+    val id: Long,
+    @SerializedName("key_id") val keyId: Long?,
+    @SerializedName("key_name") val keyName: String?,
+    val name: String?,
+    val schedule: String,
+    val tz: String?,
+    val title: String?,
+    val body: String?,
+    val enabled: Int,
+    @SerializedName("next_run_at") val nextRunAt: Long?,
+    @SerializedName("last_run_at") val lastRunAt: Long?,
+    // 服务端算好的中文描述，如「每 5 分钟」「每天 09:00（+08:00）」
+    val desc: String?
+)
+data class JobsResp(val jobs: List<JobItem>)
+data class CreateJobReq(
+    @SerializedName("key_id") val keyId: Long,
+    val name: String,
+    val schedule: String,
+    val tz: String,
+    val title: String = "",
+    val body: String = "",
+    val enabled: Boolean = true
+)
+data class UpdateJobReq(
+    @SerializedName("key_id") val keyId: Long? = null,
+    val name: String? = null,
+    val schedule: String? = null,
+    val tz: String? = null,
+    val title: String? = null,
+    val body: String? = null,
+    val enabled: Boolean? = null
+)
+data class JobResp(val id: Long, @SerializedName("next_run_at") val nextRunAt: Long?, val desc: String?)
+
 // ---------- API 定义 ----------
 interface NotifyApi {
     @POST("/api/register") suspend fun register(@Body req: CredReq): TokenResp
@@ -67,6 +104,10 @@ interface NotifyApi {
     ): NotifResp
     @POST("/api/notifications/{id}/read") suspend fun markRead(@Path("id") id: Long): Response<Unit>
     @POST("/api/notifications/{id}/delivered") suspend fun markDelivered(@Path("id") id: Long): Response<Unit>
+    @GET("/api/jobs") suspend fun listJobs(): JobsResp
+    @POST("/api/jobs") suspend fun createJob(@Body req: CreateJobReq): JobResp
+    @PUT("/api/jobs/{id}") suspend fun updateJob(@Path("id") id: Long, @Body req: UpdateJobReq): JobResp
+    @DELETE("/api/jobs/{id}") suspend fun deleteJob(@Path("id") id: Long): Response<Unit>
 }
 
 // 自动附加 Bearer token

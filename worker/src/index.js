@@ -6,6 +6,7 @@ import { listNotifications, getNotification, markRead, markDelivered, deleteNoti
 import { handleWebhook } from './webhook.js';
 import { PushHub } from './push.js';
 import { appLatest, appDownload } from './appupdate.js';
+import { listJobs, createJob, updateJob, deleteJob, runDueJobs } from './jobs.js';
 
 // Durable Object 类必须从主入口导出
 export { PushHub };
@@ -125,9 +126,47 @@ export default {
         return deleteNotification(request, env, uid, p.split('/')[2]);
       }
 
+      // 定时任务（配置在服务端，执行由 Cron 完成；端侧只做 CRUD，不需要任何定时器）
+      if (p === '/jobs' && request.method === 'GET') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return listJobs(request, env, uid);
+      }
+      if (p === '/jobs' && request.method === 'POST') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return createJob(request, env, uid);
+      }
+      if (p.startsWith('/jobs/') && request.method === 'PUT') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return updateJob(request, env, uid, p.split('/')[2]);
+      }
+      if (p.startsWith('/jobs/') && request.method === 'DELETE') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return deleteJob(request, env, uid, p.split('/')[2]);
+      }
+
       return json({ error: 'not found' }, 404);
     }
 
     return json({ error: 'not found', service: 'notify-hub' }, 404);
+  },
+
+  // Cron Triggers：每分钟一次，扫描 jobs 表执行到期任务（tick-and-scan）
+  // 与 fetch 并列，是同一种 Worker 的另一种触发方式，不会有 HTTP 请求进来。
+  // 注意点：
+  //   1) 用 controller.scheduledTime（计划时刻）而非 Date.now()，避免把本次 tick 的延迟带进 next_run_at 递推
+  //   2) 这里直接调函数，不要 fetch 自己的 /hook/:key —— 那是入站请求，会真的再计 1 次 Worker 请求
+  //   3) cron 执行失败不会重试也不会告警，靠列表里的「上次执行」自查
+  async scheduled(controller, env) {
+    const t = controller && controller.scheduledTime ? Number(controller.scheduledTime) : Date.now();
+    try {
+      const r = await runDueJobs(env, t);
+      if (r.scanned || r.errors) console.log('jobs_tick', JSON.stringify(r));
+    } catch (err) {
+      console.error('jobs_tick_failed', String(err));
+    }
   },
 };

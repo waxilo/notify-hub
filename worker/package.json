@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:cron": "wrangler dev --test-scheduled",
     "deploy": "wrangler deploy",
+    "test": "node test/schedule.test.js && node test/jobs.smoke.js",
     "migrate": "wrangler d1 execute notify-hub --file=./migrations/0001_init.sql",
-    "migrate:local": "wrangler d1 execute notify-hub --local --file=./migrations/0001_init.sql"
+    "migrate:local": "wrangler d1 execute notify-hub --local --file=./migrations/0001_init.sql",
+    "migrate:0002": "wrangler d1 execute notify-hub --file=./migrations/0002_jobs.sql",
+    "migrate:0002:local": "wrangler d1 execute notify-hub --local --file=./migrations/0002_jobs.sql"
   },
   "devDependencies": {
     "wrangler": "^3.78.0"

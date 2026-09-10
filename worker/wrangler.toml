@@ -8,6 +8,13 @@ routes = [
   { pattern = "notify-hub-worker.sloan.dpdns.org", custom_domain = true }
 ]
 
+# Cron Triggers：每分钟唤醒一次，扫描 jobs 表执行到期任务
+# 只占 1 个 cron 额度（免费档共 5 个），扇出成任意多个用户自定义 job（tick-and-scan 模式）
+# 精度：job 只会延迟不会提前，最晚延迟 = 1 个 tick（即 1 分钟），平均 30 秒
+# 注意：cron 失败不会重试也不会告警，所以列表里展示了「上次执行」时间供自查
+[triggers]
+crons = ["* * * * *"]
+
 # D1 数据库绑定
 [[d1_databases]]
 binding = "DB"

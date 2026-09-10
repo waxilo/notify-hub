@@ -67,6 +67,16 @@ input {
   transition: border-color .15s, box-shadow .15s;
 }
 input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); background: #fff; }
+/* 下拉框与输入框同款（定时任务表单的重复方式 / 时区 / 星期） */
+select {
+  width: 100%; padding: 10px 12px; margin: 0 0 4px;
+  border: 1.5px solid var(--border); border-radius: 10px;
+  font-size: 14px; background: #fbfcfe; color: var(--text);
+  transition: border-color .15s, box-shadow .15s;
+}
+select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); background: #fff; }
+.job-fields { display: flex; gap: 8px; margin-top: 2px; }
+.job-fields input, .job-fields select { flex: 1; }
 .check-row { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; color: var(--text); font-size: 13.5px; font-weight: 500; }
 .check-row input { width: auto; margin: 0; }
 

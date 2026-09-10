@@ -75,6 +75,10 @@ class KeysActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        // 定时任务：配置在服务端，由 Worker Cron 每分钟扫描执行，App 只做配置界面
+        findViewById<Button>(R.id.btnJobs).setOnClickListener {
+            startActivity(Intent(this, JobsActivity::class.java))
+        }
         findViewById<Button>(R.id.btnRefresh).setOnClickListener { loadKeys() }
 
         loadKeys()

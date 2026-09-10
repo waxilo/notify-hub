@@ -10,8 +10,7 @@
 // 同一 dedup_key 在 5 分钟窗口内只入库/推送一次，重复调用直接返回首条消息 id（deduplicated: true）。
 // 每条消息未传 dedup_key 时由服务端生成唯一 key（srv-<uuid>），随 WS 推送下发，供 App 对重推消息判重。
 import { json, readJson, readText } from './utils.js';
-
-const DEDUP_WINDOW_MS = 300_000;
+import { deliver, deliverResponse } from './deliver.js';
 
 // 按点分路径从 JSON 提取值，支持数组下标与 $ 前缀：$.event.alerts.0.title（$ 表示 JSON 本身，可省略）
 function extractByPath(obj, path) {
@@ -102,46 +101,22 @@ export async function handleWebhook(request, env, key) {
   if (title.length > 500) title = title.slice(0, 500);
   if (body.length > 8000) body = body.slice(0, 8000);
   if (dedupKey.length > 128) dedupKey = dedupKey.slice(0, 128);
-  // 每条消息都有防重 key：调用方未传时由服务端生成（UUID），随 WS 推送下发，
-  // App 端凭它对超时重推的消息做重复判断
-  if (!dedupKey) dedupKey = 'srv-' + crypto.randomUUID();
 
   await env.DB.prepare('UPDATE keys SET last_used=? WHERE id=?').bind(Date.now(), row.id).run();
 
-  // 防重：仅当调用方显式传了 dedup_key 时，窗口内同一 key 已存在则不重复入库/推送
-  if (dedupKey) {
-    const dup = await env.DB.prepare(
-      'SELECT id FROM notifications WHERE user_id=? AND dedup_key=? AND created_at>? ORDER BY id DESC LIMIT 1'
-    ).bind(row.user_id, dedupKey, Date.now() - DEDUP_WINDOW_MS).first();
-    if (dup) return json({ ok: true, deduplicated: true, id: dup.id });
-  }
+  // 入库 + 推送走公共函数（与定时 job 同一条链路）
+  // 每条消息都有防重 key：调用方未传时由 deliver 生成唯一 key（UUID），随 WS 推送下发，
+  // App 端凭它对超时重推的消息做重复判断；只有显式传了 dedup_key 才做去重。
+  const r = await deliver(env, {
+    userId: row.user_id,
+    keyId: row.id,
+    keyName: row.name || '',
+    title,
+    body,
+    payload,
+    dedupKey,
+    dedup: !!dedupKey,
+  });
 
-  const res = await env.DB.prepare(
-    'INSERT INTO notifications (user_id, key_id, dedup_key, title, body, payload, created_at, read) VALUES (?,?,?,?,?,?,?,0)'
-  ).bind(row.user_id, row.id, dedupKey, title, body, payload, Date.now()).run();
-  const notifId = res.meta.last_row_id;
-
-  // 空消息：未解析到 message 内容时只入库不推送（历史中展示为「空消息」）
-  if (!body.trim()) {
-    return json({ ok: true, id: notifId, empty: true }, 201);
-  }
-
-  // 实时推送：经 Durable Object 广播 + 0.3 秒无触达回调自动重推（失败不影响入库结果）
-  try {
-    const stub = env.PUSH_HUB.get(env.PUSH_HUB.idFromName(String(row.user_id)));
-    const msg = JSON.stringify({
-      type: 'notification',
-      id: notifId,
-      dedup_key: dedupKey,
-      key_name: row.name || '',
-      title,
-      body,
-      created_at: Date.now(),
-    });
-    await stub.fetch('https://do/notify', { method: 'POST', body: msg });
-  } catch {
-    // 离线客户端依赖 D1 + 轮询/重连后拉取兜底
-  }
-
-  return json({ ok: true, id: notifId }, 201);
+  return deliverResponse(r);
 }

@@ -53,4 +53,9 @@ export const api = {
   deleteKey: (id) => req(`/keys/${id}`, 'DELETE'),
   listNotifications: (keyId, limit = 10, offset = 0) =>
     req(`/notifications?limit=${limit}&offset=${offset}${keyId ? `&key_id=${keyId}` : ''}`),
+  // 定时任务：只做配置，执行由服务端 Cron 完成，浏览器关掉也不影响
+  listJobs: () => req('/jobs'),
+  createJob: (body) => req('/jobs', 'POST', body),
+  updateJob: (id, body) => req(`/jobs/${id}`, 'PUT', body),
+  deleteJob: (id) => req(`/jobs/${id}`, 'DELETE'),
 };
