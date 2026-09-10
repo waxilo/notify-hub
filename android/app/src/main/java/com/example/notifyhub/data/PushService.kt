@@ -88,8 +88,18 @@ class PushService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 「滑掉通知」的 deleteIntent 走 startService 送达（见 buildMessageNotification 的说明）
         if (intent?.action == ACTION_STOP_VIBRATE) {
-            LogHelper.append(this, "PushService onStartCommand: stop vibrate")
+            // 带 notif_id = 用户主动按了「停止震动」（通知上的按钮 / 告警页按钮）：
+            // 停震之外还要把横幅撤掉。持 USE_FULL_SCREEN_INTENT 时那条横幅是 persistent 的，
+            // 不会自己消失 —— 只停震不撤通知，用户回来会看到「横幅还挂着但已经没动静」。
+            // 不带 id = 滑掉通知（已经没了）或超时，无需 cancel。
+            val notifId = intent.getIntExtra(EXTRA_NOTIF_ID, 0)
+            LogHelper.append(this, "PushService onStartCommand: stop vibrate notifId=$notifId")
             stopStrongVibrate()
+            if (notifId > 0) {
+                runCatching {
+                    (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(notifId)
+                }
+            }
             if (TokenStore(this).token.isNullOrBlank()) {
                 stopSelf()
                 return START_NOT_STICKY
@@ -355,6 +365,7 @@ class PushService : Service() {
 
     private fun showNotification(title: String, body: String, id: Long, vibrate: Boolean) {
         val nm = ensureChannel()
+        if (vibrate) logFsiFacts()
         // 通知 id 使用独立高位段，绝不与前台服务通知 id（1001）冲突：
         // 一旦消息 id 撞上 FGS 通知 id，该通知会被系统按前台服务通知对待（一键清除无法移除）
         nm.notify(messageNotifId(id), buildMessageNotification(title, body, id, withFullScreen = vibrate))
@@ -366,8 +377,28 @@ class PushService : Service() {
         }
     }
 
+    // 锁屏全屏页（FSI）能否弹出，卡在三个**都在用户手上、App 只能读不能改**的外部开关上：
+    //   ① USE_FULL_SCREEN_INTENT 权限（Android 14+）
+    //   ② 推送渠道重要性（官方要求 ≥ IMPORTANCE_HIGH，且渠道一旦被调低就再也改不回来）
+    //   ③ 通知总开关
+    // 出问题时现场只在日志里，所以每条强震消息都把这四项快照打出来。
+    // 判定方法：日志里若「strong vibrate start」之后没有对应的「AlarmActivity onCreate」，
+    // 说明这一次被系统降级成了横幅（Android 13 起，判定「用户正在使用设备」时必然降级）。
+    private fun logFsiFacts() {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        val screenOn = runCatching {
+            (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive
+        }.getOrDefault(true)
+        LogHelper.append(
+            this,
+            "fsi facts: fsiPerm=${canUseFullScreenIntent(this)} channelImportance=${pushChannelImportance(this)} " +
+                "notifEnabled=${nm.areNotificationsEnabled()} screenOn=$screenOn"
+        )
+    }
+
     // withFullScreen=true 时挂 fullScreenIntent → 锁屏/灭屏拉起 AlarmActivity；
-    // 解锁态系统一定降级为「关不掉的横幅」（持 USE_FULL_SCREEN_INTENT 时）。
+    // 亮屏解锁态、或 Android 13+ 判定「用户正在使用设备」时，系统一律降级为横幅，Activity 不会启动
+    // —— 这也是震动必须留在服务层的原因（见类头注释）。
     private fun buildMessageNotification(
         title: String,
         body: String,
@@ -376,13 +407,28 @@ class PushService : Service() {
         onlyAlertOnce: Boolean = false,
     ): Notification {
         val rc = messageNotifId(id)
-        // 点击通知：带 extra 打开 App（KeysActivity 收到后发停止广播）。
-        // 用 extra 而不是「onResume 无条件停」，是为了精确区分「点击通知」与「从桌面图标进 App」。
-        val contentPi = PendingIntent.getActivity(
-            this, rc,
+
+        // 点击目标分两路，语义完全不同：
+        //   强力震动 → 告警页：用户此刻最需要的是「让它停下来」，先把出口摆在面前
+        //   普通消息 → 主界面：无事发生，直接看列表
+        // 用不同 requestCode：PendingIntent 按 (requestCode + Intent 等价性) 匹配，
+        // contentIntent 与 fullScreenIntent 若共用同一个 rc，同一条通知里会互相更新 extras，
+        // 最后表现为「点横幅进错页」这类极难定位的问题。
+        val tapIntent = if (withFullScreen) {
+            Intent(this, AlarmActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(AlarmActivity.EXTRA_TITLE, title)
+                .putExtra(AlarmActivity.EXTRA_BODY, body)
+                .putExtra(AlarmActivity.EXTRA_NOTIF_ID, rc)
+                .putExtra(AlarmActivity.EXTRA_FROM_TAP, true)  // 点横幅 = 已经看到了，进页即停震
+        } else {
+            // 普通通知刻意不带停震标记：否则点击它会误停「另一条强震消息」正在进行的震动
             Intent(this, KeysActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                .putExtra(EXTRA_STOP_VIBRATE, true),
+        }
+        val contentPi = PendingIntent.getActivity(
+            this, rc,
+            tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -394,7 +440,13 @@ class PushService : Service() {
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentIntent(contentPi)
-            .setCategory(Notification.CATEGORY_MESSAGE)
+            // ALARM 而不是 MESSAGE：官方把 FSI 的适用场景限定为「来电 / 闹钟」，
+            // 归到闹钟类能让系统与各家 ROM 在锁屏展示、FSI 判定上给出更宽的通道；
+            // 语义上也贴切 —— 强力震动提醒本质就是用户自己设的闹钟。
+            .setCategory(if (withFullScreen) Notification.CATEGORY_ALARM else Notification.CATEGORY_MESSAGE)
+            // 锁屏显示完整内容：默认 PRIVATE 在部分 ROM 上会被抹成「内容已隐藏」，
+            // 而这条通知存在的意义就是让用户不用解锁也看得清是什么事
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             // 绝不 setOngoing(true)：ongoing 通知在锁屏设备上无法被用户划掉，
             // 会直接破坏「滑掉通知即停止震动」这条路径。
             .setOngoing(false)
@@ -403,22 +455,41 @@ class PushService : Service() {
 
         if (withFullScreen) {
             val fsPi = PendingIntent.getActivity(
-                this, rc,
+                this, rc + FS_REQUEST_OFFSET,
                 Intent(this, AlarmActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     .putExtra(AlarmActivity.EXTRA_TITLE, title)
-                    .putExtra(AlarmActivity.EXTRA_BODY, body),
+                    .putExtra(AlarmActivity.EXTRA_BODY, body)
+                    .putExtra(AlarmActivity.EXTRA_NOTIF_ID, rc),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             b.setFullScreenIntent(fsPi, true)
+
+            // 通知上的「停止震动」按钮：不用点进 App、也不用干等 30 秒超时。
+            // 带 notif_id → PushService 会连横幅一起撤掉。
+            b.addAction(
+                Notification.Action.Builder(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "停止震动",
+                    PendingIntent.getService(
+                        this, rc + ACTION_REQUEST_OFFSET,
+                        Intent(this, PushService::class.java)
+                            .setAction(ACTION_STOP_VIBRATE)
+                            .putExtra(EXTRA_NOTIF_ID, rc),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                ).build()
+            )
+
             // 滑掉通知 = 停止震动。只给强震通知挂：否则滑掉一条普通通知会误停
             // 另一条消息正在进行的震动。
             // 这里刻意用 getService 而不是 getBroadcast：系统代为发出 PendingIntent 时，
             // 「动态注册的接收器 + 导出标志」是否放行存在版本差异，走 startService 没有这层歧义，
             // 由 onStartCommand 识别 ACTION_STOP_VIBRATE 处理。
+            // 不带 notif_id：通知已经被划掉了，再 cancel 一次没有意义。
             b.setDeleteIntent(
                 PendingIntent.getService(
-                    this, rc,
+                    this, rc + DELETE_REQUEST_OFFSET,
                     Intent(this, PushService::class.java).setAction(ACTION_STOP_VIBRATE),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
@@ -430,14 +501,19 @@ class PushService : Service() {
     companion object {
         // v2：旧渠道 notify_hub_push 是「有声音」的，而渠道声音属性创建后不可修改，
         // 要做到无声只能换 id（旧渠道在 ensureChannel 里删除）
-        private const val PUSH_CHANNEL_ID = "notify_hub_push_v2"
+        // 对设置页开放：渠道重要性是 FSI 的硬门槛，设置页要读它并引导用户
+        const val PUSH_CHANNEL_ID = "notify_hub_push_v2"
         private const val LEGACY_PUSH_CHANNEL_ID = "notify_hub_push"
         const val FG_CHANNEL_ID = "notify_hub_foreground"
         const val FOREGROUND_ID = 1001
 
-        // 震动停止指令：点击通知 / 滑掉通知 / 告警页按钮 / 超时关闭 都走这一条广播
+        // 震动停止指令：点击通知 / 滑掉通知 / 通知按钮 / 告警页按钮 / 超时关闭 都汇到这一个入口
         const val ACTION_STOP_VIBRATE = "com.example.notifyhub.STOP_VIBRATE"
-        // 只有「点击通知进入 App」才带这个 extra，桌面图标/最近任务进入不会误停
+        // 随停止指令携带的通知 id：>0 表示「连横幅一起撤掉」（用户主动停止），
+        // 缺省表示只停震（滑掉通知 / 超时，通知本身已消失或另有收回逻辑）
+        const val EXTRA_NOTIF_ID = "notif_id"
+        // 旧版遗留：点击通知进 KeysActivity 时带的停震标记。现在强震通知的点击目标是告警页，
+        // 普通通知不再带它 —— 保留常量仅为兼容系统里可能残留的旧 PendingIntent。
         const val EXTRA_STOP_VIBRATE = "stop_vibrate"
 
         private val VIBRATE_PATTERN = longArrayOf(0L, 700L, 500L)  // 震 700ms → 停 500ms，循环
@@ -445,6 +521,12 @@ class PushService : Service() {
 
         private const val MESSAGE_ID_BASE = 1_000_000  // 消息通知 id 段起点，避开 FGS 通知 id
         private const val DEDUP_WINDOW_MS = 3000L  // 防重缓存窗口：3 秒内同 key 只弹一次
+
+        // 同一条通知下三种 PendingIntent 的 requestCode 分段：共用 rc 基址 + 各自偏移，
+        // 既保证互不覆盖，又保证同一条消息每次重建时能命中同一个 PendingIntent
+        private const val FS_REQUEST_OFFSET = 100_000
+        private const val ACTION_REQUEST_OFFSET = 200_000
+        private const val DELETE_REQUEST_OFFSET = 300_000
 
         // 服务端为每条消息生成唯一 dedup_key（srv-<uuid>），重推消息由本缓存判重；
         // id 高位段映射，保证与前台服务通知 id 不冲突
@@ -458,5 +540,15 @@ class PushService : Service() {
             else runCatching {
                 (ctx.getSystemService(NOTIFICATION_SERVICE) as NotificationManager).canUseFullScreenIntent()
             }.getOrDefault(true)
+
+        // 推送渠道当前重要性。官方硬性要求：渠道低于 IMPORTANCE_HIGH 时系统**不会**启动 FSI，
+        // 而渠道重要性一旦被用户手动调低，App 就再也改不回来（只能引导用户去系统设置）。
+        // 返回 IMPORTANCE_NONE 表示渠道被关闭，-1 表示渠道还没创建（从未收到过推送）。
+        fun pushChannelImportance(ctx: Context): Int =
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) NotificationManager.IMPORTANCE_HIGH
+            else runCatching {
+                (ctx.getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                    .getNotificationChannel(PUSH_CHANNEL_ID)?.importance ?: -1
+            }.getOrDefault(-1)
     }
 }

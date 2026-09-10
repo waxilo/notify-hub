@@ -1186,3 +1186,56 @@ NotificationChannel(PUSH_CHANNEL_ID_V2, "通知推送", NotificationManager.IMPO
 1. **「并行编辑同一文件」这条约定已经造成一次线上事故**——它丢掉的不是格式，而是一行变量声明。凡涉及同一文件的多次改动，一律串行。
 2. **测试替身必须比生产更严格，而不是更宽容**。内存 D1 适配层缺的那一个 `undefined` 校验，直接换来了 6 分钟的线上 500。
 3. **新增列时，INSERT / UPDATE / 读取三处都要逐一核对**，只改其中两处会在最不容易被测试覆盖的地方留下缺口。
+
+---
+
+## 20. 真机反馈修正：点击横幅进告警页 + 快捷停止按钮 + FSI 失效诊断（2026-09-10）
+
+A+B 上线后用户实测反馈三条：① 息屏时只出现横幅 + 震动（设置页却显示「全屏通知已允许」）；② 点击横幅进入的是主界面，不是告警页；③ 告警页缺一个停止按钮。
+
+### 20.1 「息屏只有横幅」的根因
+
+官方 `setFullScreenIntent` 文档写死了 FSI 的触发条件，逐条对照即可定位：
+
+| 条件 | 现状 | 结论 |
+|---|---|---|
+| 渠道 importance ≥ IMPORTANCE_HIGH | 渠道 `notify_hub_push_v2` 创建时即为 HIGH | 满足 —— 但可能被用户改低，见下 |
+| 声明并持有 USE_FULL_SCREEN_INTENT | 已声明；设置页自检 `canUseFullScreenIntent()` 为 true | 满足 |
+| **SystemUI 判定「用户没有在使用设备」** | **App 无法保证，也无法绕过** | **最可疑** |
+
+第二条的官方原文（Android 开发者文档 · `Notification.Builder#setFullScreenIntent`）：
+
+> From `Build.VERSION_CODES.TIRAMISU`, **the system UI will display a heads up notification, instead of launching this intent, while the user is using the device.** This notification will display with emphasized action buttons. **If the posting app holds USE_FULL_SCREEN_INTENT, then the heads up notification will appear persistently until the user dismisses or snoozes it, or the app cancels it.**
+
+所以：
+- **亮屏解锁态必然降级为横幅** —— 这是设计行为，不是 bug，App 无解。
+- 息屏但系统仍判定「在用」（屏幕状态滞后、抬手亮屏、Smart Lock 免解锁等）同样降级。
+- 国产 ROM 另有「后台弹出界面 / 锁屏显示」等自建闸门，进一步收紧。
+- 顺带解释了「为什么那条横幅一直挂在那不消失」：持有 FSI 权限时，降级出来的 heads-up 是 **persistent** 的，只在用户划掉/稍后提醒/应用主动取消时才消失。
+
+**结论：全屏告警页定位为「尽力而为的加分项」，持续震动才是可靠的核心。** 这与方案阶段把震动从 Activity 解耦出来的判断一致 —— 若当初把震动绑在 Activity 上，恰好在这种最需要震动的场景里完全失效。
+
+另有一条**App 读得到、却改不回来**的隐患需要单独处理：**渠道重要性**。官方要求 FSI 必须落在 IMPORTANCE_HIGH 及以上的渠道上，而渠道一旦被用户手动调低，`createNotificationChannel` 再也改不回来。设置页此前只查了权限、没查渠道，于是会出现「权限全绿但全屏页不弹」。本次补上检测与跳转入口。
+
+### 20.2 改动
+
+| 文件 | 改动 |
+|---|---|
+| `PushService.kt` | ① 强震通知的 `contentIntent` 改指向 `AlarmActivity`；普通通知仍进主界面，且**去掉**停震标记 —— 原实现里点一条普通通知会误停「另一条强震消息」正在进行的震动。② 强震通知新增「停止震动」action（停震 + 撤掉 persistent 横幅）。③ 强震通知 `category` 用 `CATEGORY_ALARM`（官方 FSI 的合法用途就是来电/闹钟，同类归置在系统与 ROM 判定中更宽松）。④ 新增 `VISIBILITY_PUBLIC`，锁屏显示正文而不是「内容已隐藏」。⑤ 同一条通知下三类 PendingIntent 的 requestCode 分段（+100k / +200k / +300k），杜绝同 rc 互相更新 extras 造成的「点横幅进错页」。⑥ `ACTION_STOP_VIBRATE` 支持携带 `notif_id`：带 → 停震 + 撤通知；不带 → 只停震（滑掉 / 超时）。⑦ 新增 `logFsiFacts()`，每条强震消息记录 `fsiPerm / channelImportance / notifEnabled / screenOn`。⑧ `PUSH_CHANNEL_ID` 公开，新增 `pushChannelImportance()` 供设置页使用。 |
+| `AlarmActivity.kt` | ① 新增状态行实时倒计时（`震动中 · N 秒后自动停止` / `已停止震动`）。② 停止按钮改走 `startService` 并携带 `notifId`：点击 = 停震 + 撤横幅 + 关页面。③ 超时自动关闭**不带** id，横幅交给 `retractHeadsUp` 收回通知栏、保留可回看。④ 新增 `EXTRA_FROM_TAP`：点横幅进页视为「已看到」，进页即停震，但页面留着让用户看完正文。⑤ 按钮文案随状态切换（`停止震动` / `关闭`）。 |
+| `activity_alarm.xml` | 新增 `tvAlarmStatus` 倒计时行；底部提示改为「点『停止震动』立即结束；离开本页不会停止震动」（把规则四写进界面）。 |
+| `SettingsActivity.kt` · `activity_settings.xml` | 「提醒权限」卡片新增第三项检测：推送渠道重要性分四档（未创建 / 已关闭 / 低于「高」/ 正常），异常时出现「去检查推送渠道设置」按钮直达系统渠道页；说明文案补充 FSI 的三个前置条件与 Android 13 起的降级行为。 |
+
+### 20.3 怎么自证（不依赖 adb）
+
+App 诊断日志写在 `下载/NotifyHub/notify-hub.log`。收到一条强震消息后比对：
+
+- `fsi facts: fsiPerm=true channelImportance=4 notifEnabled=true screenOn=false` → 三个外部开关都正常（`4` 即 IMPORTANCE_HIGH）。
+- 紧接着出现 `AlarmActivity onCreate` → 全屏页确实被拉起了。
+- **只有 `strong vibrate start`、没有 `AlarmActivity onCreate`** → 这一次被系统降级为横幅（Android 13+ 的「用户在使用设备」判定，或 ROM 拦截）。震动不受影响，点横幅可直接进告警页。
+
+### 20.4 仍未决
+
+- 规则四（按 Home / 电源 / Back 离开告警页不停震）维持不变，但已在告警页界面上明示。
+- 30 秒超时后横幅是否真的被收回通知栏，仍需真机确认（官方无明文保证）。
+- 若某台设备上 FSI 长期不可用，可考虑震动期间由服务侧周期性刷新通知以强化「横幅常驻」，但会牺牲通知栏整洁度，暂不做。

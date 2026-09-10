@@ -86,8 +86,26 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
 
+                <!-- 推送渠道重要性：FSI 的硬门槛，且一旦被用户调低 App 再也改不回来 -->
                 <TextView
-                    android:text="强力震动只依赖「通知权限」与后台存活，不受全屏通知权限影响：全屏通知未开启时，锁屏/灭屏只剩 60 秒横幅，但震动照常。"
+                    android:id="@+id/tvChannelStatus"
+                    android:text="推送渠道：检查中…"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_muted"
+                    android:layout_marginTop="6dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <Button
+                    android:id="@+id/btnChannelSetting"
+                    android:text="去检查推送渠道设置"
+                    android:visibility="gone"
+                    android:layout_marginTop="12dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:text="锁屏全屏告警页需要三个条件同时成立：① 以上两项权限已开启；② 推送渠道重要性为「高」（低于「高」时系统不会弹出全屏页，且该设置被改动后 App 无法自行恢复）；③ 设备处于锁屏/息屏状态。Android 13 起，只要系统判定「用户正在使用设备」，就一律只给横幅、不弹全屏页 —— 此时震动照常持续，点击横幅可直接进入告警页。"
                     android:textSize="12sp"
                     android:textColor="@color/text_muted"
                     android:layout_marginTop="8dp"

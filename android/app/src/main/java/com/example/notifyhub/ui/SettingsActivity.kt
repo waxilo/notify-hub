@@ -34,8 +34,9 @@ class SettingsActivity : AppCompatActivity() {
         // 底部页签：首页 / 定时任务 / 设置
         BottomNav.bind(this, SettingsActivity::class.java)
 
-        // ---- 提醒权限（强力震动相关的两项官方检测）----
+        // ---- 提醒权限（强力震动相关的三项官方检测）----
         findViewById<Button>(R.id.btnFsiSetting).setOnClickListener { openFullScreenIntentSetting() }
+        findViewById<Button>(R.id.btnChannelSetting).setOnClickListener { openChannelSetting() }
         refreshPermissionState()
 
         // ---- 版本与更新 ----
@@ -115,9 +116,11 @@ class SettingsActivity : AppCompatActivity() {
         com.example.notifyhub.data.UpdateChecker.resumePendingInstall(this)
     }
 
-    // 两项官方检测：
+    // 三项官方检测：
     //   ① 通知总开关 —— 关掉后我们**不会**震动（否则就是「我把通知关了它还在震」，必被投诉）
     //   ② 全屏通知（Android 14+）—— 未授权时连锁屏都只剩 60 秒横幅；但震动不受影响
+    //   ③ 推送渠道重要性 —— 官方硬性要求 ≥ IMPORTANCE_HIGH，低于它系统绝不启动全屏页；
+    //      而渠道一旦被用户调低，App 再也改不回来（只能引导用户去系统设置），所以必须读出来
     // 厂商自建的「后台弹出界面」权限不做反射探测（非官方 API，ROM 一升级就静默误判），
     // 失效的探测比不探测更糟 —— 需要时按上面的提示文字手动前往即可。
     private fun refreshPermissionState() {
@@ -142,6 +145,58 @@ class SettingsActivity : AppCompatActivity() {
             else "全屏通知：未允许 —— 锁屏/灭屏时不会弹出全屏告警页（震动照常持续）"
             tvFsi.setTextColor(if (fsiOk) 0xFF17994F.toInt() else 0xFFC07F00.toInt())
             btnFsi.visibility = if (fsiOk) View.GONE else View.VISIBLE
+        }
+
+        // 渠道重要性分档：-1 未创建 / NONE 被关闭 / <HIGH 被调低 / ≥HIGH 正常
+        val tvCh = findViewById<TextView>(R.id.tvChannelStatus)
+        val btnCh = findViewById<Button>(R.id.btnChannelSetting)
+        val imp = PushService.pushChannelImportance(this)
+        when {
+            imp < 0 -> {
+                tvCh.text = "推送渠道：尚未创建（收到第一条推送后自动生成）"
+                tvCh.setTextColor(0xFF8A93A6.toInt())
+                btnCh.visibility = View.GONE
+            }
+            imp == NotificationManager.IMPORTANCE_NONE -> {
+                tvCh.text = "推送渠道：已关闭 —— 通知与震动都不会触发，请前往系统设置开启"
+                tvCh.setTextColor(0xFFE5484D.toInt())
+                btnCh.visibility = View.VISIBLE
+            }
+            imp < NotificationManager.IMPORTANCE_HIGH -> {
+                tvCh.text = "推送渠道：已低于「高」—— 锁屏全屏告警页不会弹出（横幅与震动仍正常）"
+                tvCh.setTextColor(0xFFC07F00.toInt())
+                btnCh.visibility = View.VISIBLE
+            }
+            else -> {
+                tvCh.text = "推送渠道：高 —— 横幅与锁屏全屏告警页均可用"
+                tvCh.setTextColor(0xFF17994F.toInt())
+                btnCh.visibility = View.GONE
+            }
+        }
+    }
+
+    // 直接落到「通知推送」这一个渠道的设置页：这里能看到并改回重要性、横幅、锁屏显示等开关，
+    // 也是全屏告警页不弹时最该先查的一页
+    private fun openChannelSetting() {
+        try {
+            startActivity(
+                Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                    .putExtra(Settings.EXTRA_CHANNEL_ID, PushService.PUSH_CHANNEL_ID)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            // 个别 ROM 不认渠道级入口，退到应用级通知设置
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (_: Exception) {
+                findViewById<TextView>(R.id.tvChannelStatus).text =
+                    "无法打开系统设置，请手动前往：设置 → 通知 → Notify Hub → 通知推送"
+            }
         }
     }
 
