@@ -5,11 +5,13 @@ import { json } from './utils.js';
 
 const DEDUP_WINDOW_MS = 300_000;   // 5 分钟防重窗口
 
-// opts: { userId, keyId, jobId, keyName, title, body, payload, dedupKey, dedup }
+// opts: { userId, keyId, jobId, keyName, title, body, payload, dedupKey, dedup, rejected }
 //   jobId：定时任务触发时传入，用于把这条通知归到某个任务名下（可单独查历史 / 清空）。
 //          外部 webhook 写入时留空，那类通知记在 keyId 上。
+//   rejected：非空表示这次调用被服务端拒绝（如 key 已停用）。只留痕不推送 ——
+//            「被拒绝」本身不需要弹系统通知，但用户得能在历史里看到，否则就是黑洞。
 //   dedup=true 时按 dedupKey 在窗口内去重（job 用；webhook 仅当调用方显式传 key 时用）
-// 返回 { id, deduplicated?, empty? }
+// 返回 { id, deduplicated?, empty?, rejected? }
 export async function deliver(env, opts) {
   const {
     userId,
@@ -21,6 +23,7 @@ export async function deliver(env, opts) {
     payload = null,
     dedupKey = '',
     dedup = false,
+    rejected = null,
   } = opts;
 
   const dk = dedupKey ? String(dedupKey).slice(0, 128) : 'srv-' + crypto.randomUUID();
@@ -35,10 +38,13 @@ export async function deliver(env, opts) {
   }
 
   const res = await env.DB.prepare(
-    'INSERT INTO notifications (user_id, key_id, job_id, dedup_key, title, body, payload, created_at, read) VALUES (?,?,?,?,?,?,?,?,0)'
-  ).bind(userId, keyId, jobId, dk, t, b, payload, Date.now()).run();
+    'INSERT INTO notifications (user_id, key_id, job_id, dedup_key, title, body, payload, rejected, created_at, read) VALUES (?,?,?,?,?,?,?,?,?,0)'
+  ).bind(userId, keyId, jobId, dk, t, b, payload, rejected, Date.now()).run();
   const id = res.meta.last_row_id;
   if (id == null) return { id: null, error: 'insert failed' };
+
+  // 被拒绝的调用只留痕不推送（历史里展示为「停用拒绝」）
+  if (rejected) return { id, rejected: true };
 
   // 空内容只入库不推送（历史里展示为「空消息」）
   if (!b.trim()) return { id, empty: true };

@@ -12,6 +12,10 @@
 import { json, readJson, readText } from './utils.js';
 import { deliver, deliverResponse } from './deliver.js';
 
+// 停用拒绝记录的防灌爆窗口：调用方通常还在按原节奏重试，按 5 分钟时间桶去重，
+// 同一 key 每 5 分钟最多留一条「停用拒绝」，既能看到有人在调，又不会把历史刷爆。
+const REJECT_DEDUP_MS = 300_000;
+
 // 按点分路径从 JSON 提取值，支持数组下标与 $ 前缀：$.event.alerts.0.title（$ 表示 JSON 本身，可省略）
 function extractByPath(obj, path) {
   if (!path || obj == null) return '';
@@ -40,8 +44,6 @@ function extractByPath(obj, path) {
 export async function handleWebhook(request, env, key) {
   const row = await env.DB.prepare('SELECT id, name, user_id, active, mode, template FROM keys WHERE key=?').bind(key).first();
   if (!row) return json({ error: 'invalid key' }, 404);
-  // 禁用状态的 key 不接收、不入库、不推送
-  if (!row.active) return json({ error: 'key is disabled' }, 403);
 
   // 标题固定为 key 名称；内容统一取 message
   let title = row.name || '通知';
@@ -82,6 +84,26 @@ export async function handleWebhook(request, env, key) {
     body = url.searchParams.get('message') || '';
     dedupKey = dedupKey || url.searchParams.get('dedup_key') || '';
     payload = JSON.stringify(obj);
+  }
+
+  // 停用的 key：不推送、不更新 last_used，但仍**留痕** ——
+  // 外部系统往往还在按原节奏调用，若直接 403 走人，用户只会看到「对方说发了、
+  // 我这边什么都没有」，无从判断是漏推送还是被拒。
+  // 记一条 rejected 记录（历史里展示为「停用拒绝」）后返回 403，调用方语义不变。
+  // 注意放在参数解析之后：这样留痕里能带上调用方原始参数，方便排查是谁在调。
+  if (!row.active) {
+    await deliver(env, {
+      userId: row.user_id,
+      keyId: row.id,
+      keyName: row.name || '',
+      title,
+      body: String(body || '').trim() || '（调用方未提供 message）',
+      payload,
+      dedupKey: `reject:${row.id}:${Math.floor(Date.now() / REJECT_DEDUP_MS)}`,
+      dedup: true,
+      rejected: 'key_disabled',
+    });
+    return json({ error: 'key is disabled' }, 403);
   }
 
   // 自定义模式（模板解析），优先级：

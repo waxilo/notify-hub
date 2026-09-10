@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
-import { API_BASE } from './config.js?v=20260910f';
-import { api, setToken, isLoggedIn } from './api.js?v=20260910f';
+import { API_BASE } from './config.js?v=20260910g';
+import { api, setToken, isLoggedIn } from './api.js?v=20260910g';
 
 
 const $ = (sel) => document.querySelector(sel);
@@ -768,7 +768,7 @@ async function openHistory({ title, subtitle, keyId, jobId, emptyText, onCleared
         </span>
       </div>
       <p class="hint xs" style="margin:0 0 8px">${escapeHtml(subtitle || '')}</p>
-      <p class="hint">状态说明：<b class="ok">已触达</b> = App 已弹出系统通知；<b class="warn">未触达</b> = App 离线尚未接收。点击「${rawLabel}」可查看该条通知的完整原始数据。</p>
+      <p class="hint">状态说明：<b class="ok">已触达</b> = App 已弹出系统通知；<b class="warn">未触达</b> = App 离线尚未接收；<b class="rej">停用拒绝</b> = key 已停用，调用被拒绝且未推送。点击「${rawLabel}」可查看该条通知的完整原始数据。</p>
       <div id="hist-body"><p class="hint">加载中…</p></div>
       <div class="modal-actions" id="hist-pager" style="justify-content:space-between;align-items:center;">
         <span class="hint" id="hist-total"></span>
@@ -805,11 +805,14 @@ async function openHistory({ title, subtitle, keyId, jobId, emptyText, onCleared
           <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th><th>${rawLabel}</th></tr></thead>
           <tbody>${notifications.map((n, i) => {
             const empty = !n.body || !String(n.body).trim();
-            const status = empty
-              ? '<span class="badge empty-msg">空消息</span>'
-              : (n.delivered_at
-                ? `<b class="ok">已触达</b><br/><span class="hint xs">${new Date(n.delivered_at).toLocaleString()}</span>`
-                : '<b class="warn">未触达</b>');
+            // 「停用拒绝」优先：这类记录服务端本就没推送，显示成「未触达」会让人以为是漏推了
+            const status = n.rejected
+              ? '<span class="badge rejected">停用拒绝</span>'
+              : (empty
+                ? '<span class="badge empty-msg">空消息</span>'
+                : (n.delivered_at
+                  ? `<b class="ok">已触达</b><br/><span class="hint xs">${new Date(n.delivered_at).toLocaleString()}</span>`
+                  : '<b class="warn">未触达</b>'));
             return `
             <tr>
               <td>${escapeHtml(n.title)}</td>

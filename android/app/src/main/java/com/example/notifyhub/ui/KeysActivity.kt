@@ -105,6 +105,31 @@ class KeysActivity : AppCompatActivity() {
         finish()
     }
 
+    // ---------- 快捷启停 ----------
+    // 不做二次确认：启停完全可逆，误触后按钮文字、状态 chip 与整条透明度会同时变化，
+    // 一眼就能看出来；真误停了再点一下即恢复。toast 里把后果说清楚即可。
+    private fun toggle(k: KeyItem, currentlyOn: Boolean) {
+        val active = !currentlyOn
+        lifecycleScope.launch {
+            try {
+                Api.safe { Api.instance(this@KeysActivity).updateKey(k.id, UpdateKeyReq(active = active)) }
+                withContext(Dispatchers.Main) {
+                    val name = k.name ?: "未命名"
+                    Toast.makeText(
+                        this@KeysActivity,
+                        if (active) "已启用「$name」" else "已停用「$name」，外部调用将被拒绝",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    loadKeys()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@KeysActivity, "操作失败：${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     // ---------- 长按条目：删除 key ----------
     private fun confirmDelete(k: KeyItem) {
         AlertDialog.Builder(this)
@@ -194,6 +219,7 @@ class KeysActivity : AppCompatActivity() {
             val tvMeta: TextView = v.findViewById(R.id.tvMeta)
             val btnHistory: Button = v.findViewById(R.id.btnHistory)
             val btnEdit: Button = v.findViewById(R.id.btnEdit)
+            val btnToggle: Button = v.findViewById(R.id.btnToggle)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
@@ -224,6 +250,9 @@ class KeysActivity : AppCompatActivity() {
                 startActivity(i)
             }
             h.btnEdit.setOnClickListener { openEdit(k) }
+            // 快捷启停：不用进编辑弹窗，误触也容易察觉（按钮文字与状态 chip 会同时变）
+            h.btnToggle.text = if (on) "停用" else "启用"
+            h.btnToggle.setOnClickListener { toggle(k, on) }
             h.itemView.setOnLongClickListener { confirmDelete(k); true }
         }
 

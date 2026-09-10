@@ -26,7 +26,7 @@ export async function listNotifications(request, env, userId) {
 
   const rows = await env.DB.prepare(
     `SELECT n.id, n.key_id, n.job_id, k.name AS key_name, n.title, n.body, n.payload,
-            n.created_at, n.read, n.delivered_at
+            n.rejected, n.created_at, n.read, n.delivered_at
      FROM notifications n
      LEFT JOIN keys k ON k.id = n.key_id
      WHERE ${whereSql}

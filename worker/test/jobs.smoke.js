@@ -2,23 +2,26 @@
 // 覆盖：到期触发 / next_run_at 推进 / 并发重复执行拦截 / 一次性任务自动停用 / 索引命中
 //      / 与外部 key 解耦（通知不带 key、标题取任务名称）
 //      / 通知归到 job_id（可查历史、可按 job 或按 key 清空、删任务/删 key 连带清历史）
+//      / 停用 key 的调用留痕（rejected=key_disabled，只入库不推送、窗口内不刷屏）
 // 运行：cd worker && node test/jobs.smoke.js
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { runDueJobs, deleteJob, listJobs } from '../src/jobs.js';
 import { clearNotifications } from '../src/notifications.js';
 import { deleteKey } from '../src/keys.js';
+import { handleWebhook } from '../src/webhook.js';
 
 const db = new DatabaseSync(':memory:');
 db.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
 // 按真实部署顺序跑迁移：0002 补列（内存库是全新的，ALTER 可直接执行）+ 0003 建 jobs 表
-// + 0004 清空 jobs.key_id + 0005 给 notifications 补 job_id + 0006 建索引。
-// 注意线上已有库不能跑 0002 / 0005（列已存在会整批回滚），只能跑幂等的 0003 / 0004 / 0006。
+// + 0004 清空 jobs.key_id + 0005 给 notifications 补 job_id + 0006 建索引 + 0007 补 rejected。
+// 注意线上已有库不能跑 0002 / 0005 / 0007（列已存在会整批回滚），只能跑幂等的 0003 / 0004 / 0006。
 db.exec(readFileSync(new URL('../migrations/0002_schema_sync.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0003_jobs.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0004_jobs_detach_key.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0005_notifications_job_id.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0006_notifications_job_index.sql', import.meta.url), 'utf8'));
+db.exec(readFileSync(new URL('../migrations/0007_notifications_rejected.sql', import.meta.url), 'utf8'));
 
 // ---- 极简 D1 适配层 ----
 const stmt = (sql) => {
@@ -212,6 +215,38 @@ const planJob = db.prepare('EXPLAIN QUERY PLAN SELECT COUNT(*) FROM notification
 ck('按 job 查询命中 idx_notif_job', JSON.stringify(planJob).includes('idx_notif_job'), JSON.stringify(planJob));
 const planGroup = db.prepare('EXPLAIN QUERY PLAN SELECT job_id, COUNT(*) FROM notifications WHERE user_id=1 AND job_id IS NOT NULL GROUP BY job_id').all();
 ck('统计查询命中 idx_notif_job', JSON.stringify(planGroup).includes('idx_notif_job'), JSON.stringify(planGroup));
+
+/* ---------------- 停用 key 的调用留痕 ---------------- */
+
+// 15) key 停用后外部往往还在按原节奏调用：不能静默 403，要在历史里留一条「停用拒绝」
+db.prepare('INSERT INTO keys (id, user_id, key, name, created_at, active, mode) VALUES (3,1,?,?,?,0,?)').run('k3', '停用通道', now, 'default');
+const pushBefore = pushes.length;
+const notifBefore = countAll();
+const hook = (qs = '') => handleWebhook(new Request('https://x/hook/k3' + qs, { method: 'GET' }), env, 'k3');
+
+let hr = await hook('?message=' + encodeURIComponent('外部还在发'));
+ck('停用 key 调用仍返回 403', hr.status === 403, 'status=' + hr.status);
+ck('停用调用被留痕', countAll() === notifBefore + 1, 'c=' + countAll());
+const rej = db.prepare('SELECT * FROM notifications WHERE key_id=3 ORDER BY id DESC LIMIT 1').get();
+ck('留痕标记 key_disabled', rej && rej.rejected === 'key_disabled', JSON.stringify(rej && rej.rejected));
+ck('留痕标题取 key 名', rej && rej.title === '停用通道', JSON.stringify(rej && rej.title));
+ck('留痕保留原始内容', rej && rej.body === '外部还在发', JSON.stringify(rej && rej.body));
+ck('留痕不挂 job_id', rej && rej.job_id === null);
+ck('留痕记在 key_id 上', rej && rej.key_id === 3);
+ck('停用调用不推送', pushes.length === pushBefore, 'pushes=' + (pushes.length - pushBefore));
+ck('停用调用不更新 last_used', db.prepare('SELECT last_used FROM keys WHERE id=3').get().last_used === null);
+
+// 同一 5 分钟窗口内重复调用不再新增（外部高频重试不会把历史刷爆）
+hr = await hook('?message=' + encodeURIComponent('再来一次'));
+ck('窗口内重复调用不刷屏', countAll() === notifBefore + 1 && hr.status === 403, 'c=' + countAll());
+
+// 重新启用后恢复正常：写入 + 推送，且不受前面的拒绝记录影响
+db.prepare('UPDATE keys SET active=1 WHERE id=3').run();
+const pushBefore2 = pushes.length;
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('恢复后正常'), { method: 'GET' }), env, 'k3');
+ck('启用后调用恢复正常', hr.status === 201, 'status=' + hr.status);
+ck('启用后正常推送', pushes.length === pushBefore2 + 1, 'pushes=' + (pushes.length - pushBefore2));
+ck('启用后写入的是正常记录', db.prepare('SELECT rejected FROM notifications WHERE key_id=3 ORDER BY id DESC LIMIT 1').get().rejected === null);
 
 console.log(bad ? '\n' + bad + ' FAILED' : '\nALL PASS');
 process.exit(bad ? 1 : 0);

@@ -44,6 +44,8 @@ data class NotificationItem(
     val payload: String?,
     @SerializedName("key_id") val keyId: Long?,
     @SerializedName("key_name") val keyName: String?,
+    // 非空表示这次调用被服务端拒绝（如 'key_disabled'），历史里展示为「停用拒绝」
+    val rejected: String?,
     @SerializedName("created_at") val createdAt: Long,
     val read: Int,
     @SerializedName("delivered_at") val deliveredAt: Long?

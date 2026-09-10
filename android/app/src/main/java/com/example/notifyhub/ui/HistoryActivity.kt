@@ -89,9 +89,11 @@ class HistoryActivity : AppCompatActivity() {
                 }
                 total = resp.total
                 resp.notifications.forEach { n ->
-                    // 空消息与触达状态互斥：内容为空的服务端不会推送，自然无触达概念
+                    // 空消息与触达状态互斥：内容为空的服务端不会推送，自然无触达概念。
+                    // 「停用拒绝」优先判断：这类记录本就没推送，显示成「未触达」会让人以为是漏推了。
                     rows.add(
                         when {
+                            n.rejected != null -> Row(n, "停用拒绝", 0xFFE5484D.toInt(), R.drawable.bg_chip_off)
                             n.body.isNullOrBlank() -> Row(n, "空消息", 0xFF8A93A6.toInt(), R.drawable.bg_chip_off)
                             n.deliveredAt != null -> Row(n, "已触达", 0xFF17994F.toInt(), R.drawable.bg_chip_on)
                             else -> Row(n, "未触达", 0xFFC07F00.toInt(), R.drawable.bg_chip_off)

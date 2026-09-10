@@ -35,6 +35,7 @@ notify-hub/
 │   │            # jobs.js(定时任务 CRUD+执行) schedule.js(预设串解析) deliver.js(投递公共函数) push.js(DO)
 │   ├── migrations/0001_init.sql  0002_schema_sync.sql  0003_jobs.sql  0004_jobs_detach_key.sql
 │   │             0005_notifications_job_id.sql  0006_notifications_job_index.sql
+│   │             0007_notifications_rejected.sql
 │   └── wrangler.toml
 ├── pages/       # Cloudflare Pages 静态控制台（仅配置，无构建）
 │   ├── index.html  styles.css  src/{config,api,app}.js
@@ -71,16 +72,17 @@ wrangler secret put JWT_SECRET
 > ⚠️ **wrangler v4 的 `d1 execute` 默认只操作本地库**，对线上库必须显式加 `--remote`。不加的话命令会"成功"但线上表根本没建，之后应用全部 500。
 
 ```bash
-# 分六个文件，按顺序执行（全新库也可一条 npm run migrate:all 全跑）
+# 分七个文件，按顺序执行（全新库也可一条 npm run migrate:all 全跑）
 npm run migrate        # 0001：基础三张表（users / keys / notifications）
 npm run migrate:sync   # 0002：补齐 0001 之后手工 ALTER 出来的字段（不幂等，列已存在会报 duplicate column）
 npm run migrate:jobs   # 0003：定时任务表 jobs + 扫描索引（幂等，可重复执行）
 npm run migrate:detach # 0004：清空 jobs.key_id —— 定时任务与外部 key 解耦（幂等，可重复执行）
 npm run migrate:notifjob # 0005：notifications 增加 job_id —— 任务日志可单独检索/清空（不幂等，只能跑一次）
 npm run migrate:notifidx # 0006：job_id 检索索引 idx_notif_job（幂等，可重复执行）
+npm run migrate:rejected # 0007：notifications 增加 rejected —— 停用 key 的调用留痕（不幂等，只能跑一次）
 ```
 
-> `migrate:all` 里含 0002 / 0005 两个**不幂等**的 ALTER，只适合全新库一次性跑完；已有库请只跑自己缺的那几个幂等文件。
+> `migrate:all` 里含 0002 / 0005 / 0007 三个**不幂等**的 ALTER，只适合全新库一次性跑完；已有库请只跑自己缺的那几个幂等文件。
 
 说明：
 
@@ -189,6 +191,8 @@ curl -X POST "https://notify-hub-worker.<sub>.workers.dev/hook/<KEY>" \
 
 # POST 表单 / 纯文本同样支持，body 取 message/body/text 字段
 ```
+
+> **key 停用后的调用**：返回 `403 {"error":"key is disabled"}`、不推送，但会往该 key 的历史里写一条**「停用拒绝」**记录（`rejected=key_disabled`，保留调用方原始参数与内容），方便排查「外部还在发、我这边什么都没收到」。同一 key 每 5 分钟最多留一条，避免调用方高频重试把历史刷爆。
 
 ---
 

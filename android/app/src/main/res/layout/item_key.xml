@@ -67,5 +67,15 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content" />
+
+        <!-- 快捷启停：停用后外部调用会被拒绝（历史里记为「停用拒绝」），无需进编辑弹窗 -->
+        <Button
+            android:id="@+id/btnToggle"
+            android:text="停用"
+            android:textSize="13sp"
+            android:layout_marginStart="8dp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content" />
     </LinearLayout>
 </LinearLayout>

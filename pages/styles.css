@@ -319,3 +319,6 @@ table code { font-size: 12px; }
 }
 .raw-pop pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, Menlo, monospace; }
 .badge.empty-msg { background: #eef0f4; color: #6b7484; }
+/* 调用被拒绝（key 已停用）：用警示色区分于「空消息」和「未触达」 */
+.badge.rejected { background: #fdecec; color: var(--danger); }
+b.rej { color: var(--danger); }
