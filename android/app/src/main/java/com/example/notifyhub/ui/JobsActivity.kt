@@ -208,6 +208,21 @@ class JobsActivity : AppCompatActivity() {
         val keyIdx = keys.indexOfFirst { it.id == job?.keyId }
         if (keyIdx >= 0) spKey.setSelection(keyIdx)
 
+        // 高级设置默认收起，缩短表单。已填过标题、改过时区，或任务处于停用状态时自动展开，
+        // 避免用户以为原有配置丢了。
+        val tvAdvanced = v.findViewById<TextView>(R.id.tvAdvanced)
+        val llAdvanced = v.findViewById<View>(R.id.llAdvanced)
+        fun advLabel(open: Boolean) = (if (open) "▾ " else "▸ ") + "高级设置（通知标题 / 时区）"
+        if (!job?.title.isNullOrEmpty() || tz != defaultTz() || job?.enabled == 0) {
+            llAdvanced.visibility = View.VISIBLE
+        }
+        tvAdvanced.text = advLabel(llAdvanced.visibility == View.VISIBLE)
+        tvAdvanced.setOnClickListener {
+            val open = llAdvanced.visibility == View.VISIBLE
+            llAdvanced.visibility = if (open) View.GONE else View.VISIBLE
+            tvAdvanced.text = advLabel(!open)
+        }
+
         val syncFields = {
             val k = spKind.selectedItemPosition
             llEvery.visibility = if (k == 0) View.VISIBLE else View.GONE

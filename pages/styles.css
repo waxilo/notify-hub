@@ -75,10 +75,26 @@ select {
   transition: border-color .15s, box-shadow .15s;
 }
 select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); background: #fff; }
-.job-fields { display: flex; gap: 8px; margin-top: 2px; }
-.job-fields input, .job-fields select { flex: 1; }
+.job-fields { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+/* 必须显式声明：[hidden] 属于 UA 样式，优先级低于上面的 display:flex，不写这行四个重复方式的输入行会同时显示 */
+.job-fields[hidden] { display: none; }
+.job-fields input, .job-fields select { flex: 1; min-width: 0; }
+.job-fields .pre { flex: 0 0 auto; font-size: 13.5px; color: var(--muted); }
+.job-preview { margin: 6px 0 0; font-size: 12.5px; color: var(--primary); font-weight: 600; }
 .check-row { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; color: var(--text); font-size: 13.5px; font-weight: 500; }
 .check-row input { width: auto; margin: 0; }
+/* 高级设置折叠区：把标题 / 时区 / 启用等低频项收起来，主表单只留必填项 */
+.adv { margin: 14px 0 0; border-top: 1px dashed var(--border); padding-top: 10px; }
+.adv > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: var(--muted);
+}
+.adv > summary:hover { color: var(--text); }
+.adv > summary::-webkit-details-marker { display: none; }
+.adv > summary::before { content: '▸'; font-size: 11px; }
+.adv[open] > summary::before { content: '▾'; }
+.adv-body { padding-top: 2px; }
 
 /* ---- 按钮 ---- */
 .btn {

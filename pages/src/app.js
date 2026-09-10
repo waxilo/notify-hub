@@ -264,11 +264,13 @@ function openKeyCreate() {
     </div>
   </div>`;
   $('#create-cancel').onclick = () => { root_.innerHTML = ''; };
-  $('#create-form').onsubmit = async (e) => {
+  const createForm = $('#create-form');
+  createForm.onsubmit = async (e) => {
     e.preventDefault();
     $('#create-msg').textContent = '';
     try {
-      const k = await api.createKey(e.target.name.value.trim() || 'default');
+      // e.target 就是 form，e.target.name 同样会被 HTMLFormElement.name 遮蔽，必须走 elements
+      const k = await api.createKey(createForm.elements.name.value.trim() || 'default');
       $('#create-body').innerHTML = `
         <div class="alert">
           <b>✅ 已生成（随时可在下方列表复制）</b><br/>
@@ -432,7 +434,9 @@ function openKeyEdit(k) {
     </div>
   </div>`;
   const form = $('#edit-form');
-  const syncTpl = () => { $('#tpl-fields').hidden = form.mode.value !== 'custom'; };
+  // 同上：form.name 会被 HTMLFormElement 自身的 name 属性遮蔽，必须走 form.elements
+  const F = form.elements;
+  const syncTpl = () => { $('#tpl-fields').hidden = F.mode.value !== 'custom'; };
   form.querySelectorAll('input[name=mode]').forEach((r) => { r.onchange = syncTpl; });
   $('#edit-cancel').onclick = () => { root_.innerHTML = ''; };
   form.onsubmit = async (e) => {
@@ -440,10 +444,10 @@ function openKeyEdit(k) {
     $('#edit-msg').textContent = '';
     try {
       await api.updateKey(k.id, {
-        name: form.name.value.trim(),
-        active: form.active.checked,
-        mode: form.mode.value,
-        template: form.mode.value === 'custom' ? form.template.value : '',
+        name: F.name.value.trim(),
+        active: F.active.checked,
+        mode: F.mode.value,
+        template: F.mode.value === 'custom' ? F.template.value : '',
       });
       root_.innerHTML = '';
       loadList();
@@ -495,8 +499,7 @@ async function renderJobs() {
         <button class="btn primary" id="btn-new-job">＋ 新建任务</button>
       </div>
       <p class="hint" style="margin-top:-6px;margin-bottom:12px;">
-        任务在<b>服务端</b>执行：Cron 每分钟扫描一次，到期即写入通知并推送给 App。
-        浏览器关闭、手机离线、进程被杀都不影响触发；实际触发比设定时刻晚 0–1 分钟（只会延迟，不会提前）。
+        任务在<b>服务端</b>执行，关掉浏览器、手机关机都会照常触发；实际触发比设定时刻晚 0–1 分钟。
       </p>
       <div id="job-list"><p class="hint">加载中…</p></div>
       <p class="hint" id="job-flash"></p>
@@ -561,6 +564,8 @@ async function openJobEdit(job) {
   const sc = splitSchedule(job && job.schedule);
   const tz = (job && job.tz) || localTz();
   const root_ = $('#modal-root');
+  // 已填过标题、改过时区或处于停用状态时，直接展开高级设置，避免用户以为配置丢了
+  const needAdv = !!job && (!!job.title || job.tz !== localTz() || !job.enabled);
 
   root_.innerHTML = `
   <div class="modal-mask">
@@ -568,54 +573,62 @@ async function openJobEdit(job) {
       <h2>${isNew ? '新建定时任务' : '编辑定时任务'}</h2>
       <form id="job-form">
         <label>任务名称</label>
-        <input name="name" value="${escapeHtml((job && job.name) || '')}" placeholder="如：每 5 分钟心跳检查" required />
+        <input name="name" value="${escapeHtml((job && job.name) || '')}" placeholder="如：每日签到提醒" required />
 
         <label>通知通道</label>
         <select name="key_id">
           ${keys.map((k) => `<option value="${k.id}" ${job && String(job.key_id) === String(k.id) ? 'selected' : ''}>${escapeHtml(k.name)}</option>`).join('')}
         </select>
-        <p class="hint">通知标题默认取通道名称；下面填了标题则以标题为准。</p>
-
-        <label>通知标题（可选）</label>
-        <input name="title" value="${escapeHtml((job && job.title) || '')}" placeholder="留空则用通道名称" />
-
-        <label>通知内容</label>
-        <input name="body" value="${escapeHtml((job && job.body) || '')}" placeholder="留空则用任务名称" />
 
         <label>重复方式</label>
         <select name="kind" id="job-kind">
           <option value="every" ${sc.kind === 'every' ? 'selected' : ''}>固定间隔</option>
           <option value="daily" ${sc.kind === 'daily' ? 'selected' : ''}>每天</option>
           <option value="weekly" ${sc.kind === 'weekly' ? 'selected' : ''}>每周</option>
-          <option value="once" ${sc.kind === 'once' ? 'selected' : ''}>一次性</option>
+          <option value="once" ${sc.kind === 'once' ? 'selected' : ''}>仅一次</option>
         </select>
 
         <div class="job-fields" data-f="every" hidden>
-          <input name="n" type="number" min="1" value="${escapeHtml(sc.n || '5')}" />
-          <select name="u">
-            <option value="m" ${sc.u === 'm' ? 'selected' : ''}>分钟</option>
+          <span class="pre">每</span>
+          <input name="n" type="number" min="1" value="${escapeHtml(sc.n || '5')}" aria-label="间隔数值" />
+          <select name="u" aria-label="间隔单位">
+            <option value="m" ${sc.u === 'h' ? '' : 'selected'}>分钟</option>
             <option value="h" ${sc.u === 'h' ? 'selected' : ''}>小时</option>
           </select>
         </div>
         <div class="job-fields" data-f="daily" hidden>
-          <input name="time" type="time" value="${escapeHtml(sc.kind === 'daily' ? sc.time : '09:00')}" />
+          <span class="pre">每天</span>
+          <input name="time" type="time" value="${escapeHtml(sc.kind === 'daily' ? sc.time : '09:00')}" aria-label="触发时刻" />
         </div>
         <div class="job-fields" data-f="weekly" hidden>
-          <select name="dow">
+          <span class="pre">每</span>
+          <select name="dow" aria-label="星期">
             ${DOW_OPTS.map((d, i) => `<option value="${i}" ${sc.kind === 'weekly' && String(sc.dow) === String(i) ? 'selected' : ''}>${d}</option>`).join('')}
           </select>
-          <input name="time" type="time" value="${escapeHtml(sc.kind === 'weekly' ? sc.time : '09:00')}" />
+          <input name="time" type="time" value="${escapeHtml(sc.kind === 'weekly' ? sc.time : '09:00')}" aria-label="触发时刻" />
         </div>
         <div class="job-fields" data-f="once" hidden>
-          <input name="at" type="datetime-local" value="${escapeHtml(sc.kind === 'once' ? sc.at : '')}" />
+          <input name="at" type="datetime-local" value="${escapeHtml(sc.kind === 'once' ? sc.at : '')}" aria-label="触发时刻" />
         </div>
+        <p class="job-preview" id="job-preview"></p>
 
-        <label>时区</label>
-        <select name="tz">
-          ${TZ_OPTS.map((t) => `<option value="${t}" ${t === tz ? 'selected' : ''}>UTC${t}${t === '+08:00' ? '（北京时间）' : ''}</option>`).join('')}
-        </select>
+        <label>通知内容</label>
+        <input name="body" value="${escapeHtml((job && job.body) || '')}" placeholder="留空则用任务名称" />
 
-        <label class="check-row"><input type="checkbox" name="enabled" ${!job || job.enabled ? 'checked' : ''}/> 启用此任务</label>
+        <details class="adv" ${needAdv ? 'open' : ''}>
+          <summary>高级设置（通知标题 / 时区 / 启停）</summary>
+          <div class="adv-body">
+            <label>通知标题</label>
+            <input name="title" value="${escapeHtml((job && job.title) || '')}" placeholder="留空则用通道名称" />
+
+            <label>时区</label>
+            <select name="tz">
+              ${TZ_OPTS.map((t) => `<option value="${t}" ${t === tz ? 'selected' : ''}>UTC${t}${t === '+08:00' ? '（北京时间）' : ''}</option>`).join('')}
+            </select>
+
+            <label class="check-row"><input type="checkbox" name="enabled" ${!job || job.enabled ? 'checked' : ''}/> 启用此任务</label>
+          </div>
+        </details>
 
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="job-cancel">取消</button>
@@ -627,41 +640,84 @@ async function openJobEdit(job) {
   </div>`;
 
   const form = $('#job-form');
+  // 注意：不能用 form.name / form.title 取值 —— 这两个名字被 HTMLFormElement / HTMLElement
+  // 自身的 IDL 属性占用（返回表单的 name、title 特性，值为空字符串），
+  // 会静默绕过同名 input，导致取值 undefined。统一走 form.elements。
+  const F = form.elements;
+  const timeEl = (k) => form.querySelector(`.job-fields[data-f="${k}"] [name=time]`);
+
+  // 当前配置的一句话预览，让用户直接确认"它到底什么时候触发"
+  const preview = (k) => {
+    if (k === 'every') {
+      const n = parseInt(F.n.value, 10);
+      return Number.isFinite(n) && n > 0
+        ? `→ 每 ${n} ${F.u.value === 'h' ? '小时' : '分钟'}触发一次`
+        : '→ 请填写间隔';
+    }
+    if (k === 'daily') {
+      const t = timeEl('daily');
+      return `→ 每天 ${(t && t.value) || '--:--'} 触发`;
+    }
+    if (k === 'weekly') {
+      const t = timeEl('weekly');
+      const d = DOW_OPTS[Number(F.dow.value)] || DOW_OPTS[0];
+      return `→ 每${d} ${(t && t.value) || '--:--'} 触发`;
+    }
+    return F.at.value ? `→ 仅在 ${F.at.value.replace('T', ' ')} 触发一次，触发后自动停用` : '→ 请选择触发时间';
+  };
+
   const syncFields = () => {
-    const k = form.kind.value;
+    const k = F.kind.value;
     form.querySelectorAll('.job-fields').forEach((d) => { d.hidden = d.dataset.f !== k; });
+    const p = $('#job-preview');
+    if (p) p.textContent = preview(k);
   };
   form.kind.onchange = syncFields;
+  form.addEventListener('input', syncFields);
   syncFields();
   $('#job-cancel').onclick = () => { root_.innerHTML = ''; };
 
   form.onsubmit = async (e) => {
     e.preventDefault();
-    $('#job-msg').textContent = '';
-    const k = form.kind.value;
-    // daily 与 weekly 各有一个 name=time，按当前类型精确取值，避免同名取错
-    const timeEl = form.querySelector(`.job-fields[data-f="${k}"] [name=time]`);
+    const msg = $('#job-msg');
+    msg.textContent = '';
+    const k = F.kind.value;
+    const kTime = timeEl(k);
+    const needTime = k === 'daily' || k === 'weekly';
+    if (needTime && !/^\d{2}:\d{2}$/.test((kTime && kTime.value) || '')) {
+      msg.textContent = '请选择触发时间';
+      return;
+    }
+    if (k === 'once' && !F.at.value) {
+      msg.textContent = '请选择触发时间';
+      return;
+    }
+    if (k === 'every' && !(parseInt(F.n.value, 10) >= 1)) {
+      msg.textContent = '间隔必须是大于 0 的整数';
+      return;
+    }
     const schedule = joinSchedule(k, {
-      n: form.n.value, u: form.u.value,
-      time: timeEl ? timeEl.value : '',
-      dow: form.dow.value,
-      at: form.at.value,
+      n: F.n.value, u: F.u.value,
+      time: kTime ? kTime.value : '',
+      dow: F.dow.value,
+      at: F.at.value,
     });
     const payload = {
-      name: form.name.value.trim(),
-      key_id: Number(form.key_id.value),
-      title: form.title.value.trim(),
-      body: form.body.value,
+      name: F.name.value.trim(),
+      key_id: Number(F.key_id.value),
+      title: F.title.value.trim(),
+      body: F.body.value,
       schedule,
-      tz: form.tz.value,
-      enabled: form.enabled.checked,
+      tz: F.tz.value,
+      enabled: F.enabled.checked,
     };
     try {
       const r = isNew ? await api.createJob(payload) : await api.updateJob(job.id, payload);
       root_.innerHTML = '';
       loadJobs();
-      $('#job-flash') && ($('#job-flash').textContent = `已保存 · 下次执行 ${fmtTime(r.next_run_at)}`);
-    } catch (err) { $('#job-msg').textContent = err.message; }
+      const flash = $('#job-flash');
+      if (flash) flash.textContent = `已保存 · 下次执行 ${fmtTime(r.next_run_at)}`;
+    } catch (err) { msg.textContent = err.message; }
   };
 }
 
