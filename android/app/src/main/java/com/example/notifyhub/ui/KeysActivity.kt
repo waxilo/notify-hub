@@ -22,19 +22,14 @@ import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
 import com.example.notifyhub.api.KeyItem
 import com.example.notifyhub.api.UpdateKeyReq
-import com.example.notifyhub.data.ConfigStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// 首页：Key 列表管理（测试 / 历史 / 编辑）；定时任务与设置从底部页签进入
+// 首页：Key 列表管理（历史 / 编辑）；定时任务与设置从底部页签进入
 class KeysActivity : AppCompatActivity() {
 
     private val keys = mutableListOf<KeyItem>()
@@ -110,38 +105,11 @@ class KeysActivity : AppCompatActivity() {
         finish()
     }
 
-    // ---------- 测试发送 ----------
-    private fun sendTest(k: KeyItem, btn: Button) {
-        btn.isEnabled = false
-        btn.text = "发送中"
-        lifecycleScope.launch {
-            var result: String
-            try {
-                val full = k.keyFull ?: throw IllegalStateException("缺少完整 key")
-                val base = ConfigStore(this@KeysActivity).apiBase.removeSuffix("/")
-                val json = """{"message":"来自 App 的测试"}"""
-                val req = Request.Builder()
-                    .url("$base/hook/$full")
-                    .post(json.toRequestBody("application/json".toMediaType()))
-                    .build()
-                val resp = Api.safe { OkHttpClient().newCall(req).execute() }
-                resp.use { result = if (it.isSuccessful) "✅ 已送达「${k.name}」" else "❌ 失败（HTTP ${it.code}）" }
-            } catch (e: Exception) {
-                result = "❌ ${e.message}"
-            }
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@KeysActivity, result, Toast.LENGTH_SHORT).show()
-                btn.isEnabled = true
-                btn.text = "测试"
-            }
-        }
-    }
-
     // ---------- 长按条目：删除 key ----------
     private fun confirmDelete(k: KeyItem) {
         AlertDialog.Builder(this)
             .setTitle("删除 Key")
-            .setMessage("彻底删除「${k.name}」？\n该 key 的 Hook 地址将失效，全部发送历史一并清除，不可恢复。")
+            .setMessage("彻底删除「${k.name}」？\n该 key 的 Hook 地址将失效，已写入的全部历史一并清除，不可恢复。")
             .setPositiveButton("删除") { _, _ ->
                 lifecycleScope.launch {
                     try {
@@ -224,7 +192,6 @@ class KeysActivity : AppCompatActivity() {
             val tvName: TextView = v.findViewById(R.id.tvName)
             val tvStatus: TextView = v.findViewById(R.id.tvStatus)
             val tvMeta: TextView = v.findViewById(R.id.tvMeta)
-            val btnTest: Button = v.findViewById(R.id.btnTest)
             val btnHistory: Button = v.findViewById(R.id.btnHistory)
             val btnEdit: Button = v.findViewById(R.id.btnEdit)
         }
@@ -249,11 +216,11 @@ class KeysActivity : AppCompatActivity() {
             val used = k.lastUsed?.let { "最近使用 ${fmt.format(Date(it))}" } ?: "从未使用"
             h.tvMeta.text = "…${(k.keyFull ?: k.key).takeLast(6)} · $used"
             h.itemView.alpha = if (on) 1f else 0.62f
-            h.btnTest.isEnabled = on
-            h.btnTest.setOnClickListener { sendTest(k, h.btnTest) }
             h.btnHistory.setOnClickListener {
-                val i = Intent(this@KeysActivity, KeyHistoryActivity::class.java)
+                val i = Intent(this@KeysActivity, HistoryActivity::class.java)
                 i.putExtra("key_id", k.id)
+                i.putExtra("title", "「${k.name ?: "未命名"}」发送历史")
+                i.putExtra("subtitle", "外部系统调用该 key 写入的通知记录")
                 startActivity(i)
             }
             h.btnEdit.setOnClickListener { openEdit(k) }

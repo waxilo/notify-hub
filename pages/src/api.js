@@ -51,8 +51,20 @@ export const api = {
   listKeys: () => req('/keys'),
   updateKey: (id, body) => req(`/keys/${id}`, 'PUT', body),
   deleteKey: (id) => req(`/keys/${id}`, 'DELETE'),
-  listNotifications: (keyId, limit = 10, offset = 0) =>
-    req(`/notifications?limit=${limit}&offset=${offset}${keyId ? `&key_id=${keyId}` : ''}`),
+  // 历史查询：keyId = 外部 key 的写入记录，jobId = 定时任务的触发记录（二者互斥，不会同时有值）
+  listNotifications: ({ keyId, jobId, limit = 10, offset = 0 } = {}) => {
+    const q = new URLSearchParams({ limit, offset });
+    if (keyId) q.set('key_id', keyId);
+    if (jobId) q.set('job_id', jobId);
+    return req(`/notifications?${q}`);
+  },
+  // 批量清空历史：服务端要求必须带 key_id 或 job_id（不提供「清空全部」）
+  clearNotifications: ({ keyId, jobId }) => {
+    const q = new URLSearchParams();
+    if (keyId) q.set('key_id', keyId);
+    if (jobId) q.set('job_id', jobId);
+    return req(`/notifications?${q}`, 'DELETE');
+  },
   // 定时任务：只做配置，执行由服务端 Cron 完成，浏览器关掉也不影响
   listJobs: () => req('/jobs'),
   createJob: (body) => req('/jobs', 'POST', body),

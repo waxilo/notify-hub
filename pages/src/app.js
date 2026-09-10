@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
-import { API_BASE } from './config.js?v=20260910a';
-import { api, getToken, setToken, isLoggedIn, loadingPush, loadingPop } from './api.js?v=20260910a';
+import { API_BASE } from './config.js?v=20260910f';
+import { api, setToken, isLoggedIn } from './api.js?v=20260910f';
 
 
 const $ = (sel) => document.querySelector(sel);
@@ -309,8 +309,7 @@ async function loadList() {
         <div class="key-sub">
           <span class="hint">最近使用：${k.last_used ? new Date(k.last_used).toLocaleString() : '从未使用'}</span>
         </div>
-      </div>`).join('')}</div>
-    <p class="msg" id="test-msg"></p>`;
+      </div>`).join('')}</div>`;
 
     const find = (id) => keys.find((x) => String(x.id) === id);
 
@@ -339,8 +338,12 @@ async function loadList() {
         menu.className = 'key-menu';
         const items = [
           ['复制 Hook 地址', () => copyText(`${API_BASE}/hook/${k.keyFull || k.key}`, b)],
-          ...(k.active ? [['测试', () => testKey(k)]] : []),
-          ['历史', () => openKeyHistory(k)],
+          ['历史', () => openHistory({
+            title: `「${k.name}」发送历史`,
+            subtitle: '外部系统调用该 key 的写入记录',
+            keyId: k.id,
+            emptyText: '该 key 还没有发送记录。',
+          })],
           ['编辑', () => openKeyEdit(k)],
           k.active
             ? ['停用', async () => { await api.updateKey(k.id, { active: false }); loadList(); }]
@@ -354,28 +357,6 @@ async function loadList() {
         b.closest('.key-row').appendChild(menu);
       };
     });
-
-    // 测试发送（菜单项调用）
-    async function testKey(k) {
-      const msg = $('#test-msg');
-      msg.textContent = '';
-      loadingPush();
-      try {
-        const res = await fetch(`${API_BASE}/hook/${encodeURIComponent(k.keyFull)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: '来自 Web 控制台的测试' }),
-        });
-        const data = await res.json().catch(() => ({}));
-        msg.textContent = res.ok
-          ? `✅ 测试已送达「${k.name}」（通知 id: ${data.id}），App 在线将实时弹出通知`
-          : `❌ 发送失败（HTTP ${res.status}）：${data.error || '未知错误'}`;
-      } catch (err) {
-        msg.textContent = `❌ 网络错误：${err.message}`;
-      } finally {
-        loadingPop();
-      }
-    }
   } catch (err) { box.innerHTML = `<p class="msg">${err.message}</p>`; }
 }
 
@@ -538,7 +519,11 @@ async function loadJobs() {
           <span class="hint">下次执行：${j.enabled ? fmtTime(j.next_run_at) : '（已停用）'}</span>
           <span class="hint">上次执行：${fmtTime(j.last_run_at)}</span>
         </div>
+        <div class="key-sub">
+          <span class="hint">已发送 <b>${j.sent_count || 0}</b> 条日志</span>
+        </div>
         <div class="row" style="margin-top:8px">
+          <button class="btn mini" data-log="${j.id}">查看日志</button>
           <button class="btn mini" data-edit="${j.id}">编辑</button>
           <button class="btn mini" data-toggle="${j.id}">${j.enabled ? '停用' : '启用'}</button>
           <button class="btn mini danger" data-del="${j.id}">删除</button>
@@ -548,6 +533,18 @@ async function loadJobs() {
     const find = (id) => jobs.find((x) => String(x.id) === id);
     box.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => openJobEdit(find(b.dataset.edit)); });
     box.querySelectorAll('[data-del]').forEach((b) => { b.onclick = () => openJobDelete(find(b.dataset.del)); });
+    box.querySelectorAll('[data-log]').forEach((b) => {
+      b.onclick = () => {
+        const j = find(b.dataset.log);
+        openHistory({
+          title: `「${j.name || '未命名任务'}」执行日志`,
+          subtitle: '该任务每次触发产生的通知记录',
+          jobId: j.id,
+          emptyText: '该任务还没有触发记录。',
+          onCleared: loadJobs,
+        });
+      };
+    });
     box.querySelectorAll('[data-toggle]').forEach((b) => {
       b.onclick = async () => {
         const j = find(b.dataset.toggle);
@@ -730,7 +727,7 @@ function openJobDelete(job) {
   <div class="modal-mask">
     <div class="modal card">
       <h2>删除定时任务</h2>
-      <p class="hint">确认删除「${escapeHtml(job.name || '未命名任务')}」？删除后不再触发，已产生的通知历史不受影响。</p>
+      <p class="hint">确认删除「${escapeHtml(job.name || '未命名任务')}」？删除后不再触发，该任务已产生的 <b>${job.sent_count || 0} 条日志将一并清除</b>，不可恢复。</p>
       <div class="modal-actions">
         <button type="button" class="btn ghost" id="jdel-cancel">取消</button>
         <button type="button" class="btn primary danger" id="jdel-confirm">确认删除</button>
@@ -745,22 +742,33 @@ function openJobDelete(job) {
   };
 }
 
-/* ---------- 按 key 历史（弹窗 + 分页） ---------- */
+/* ---------- 发送历史（弹窗 + 分页 + 清空） ---------- */
 
 const HIST_PAGE_SIZE = 10;
 
-async function openKeyHistory(k) {
+// 通用历史弹窗：keyId = 外部 key 的写入记录；jobId = 定时任务的触发记录。
+// 两者在数据上互斥（key 通知的 job_id 为空，job 通知的 key_id 为空），所以清空也各清各的。
+// onCleared：清空成功后回调，让调用方刷新列表上的「已发送 N 条」。
+async function openHistory({ title, subtitle, keyId, jobId, emptyText, onCleared }) {
   const root_ = $('#modal-root');
   let page = 0;
+  let total = 0;
+  const isJob = !!jobId;
+  const rawLabel = isJob ? '触发信息' : '原文';
+  const rawTitle = isJob ? '触发详情' : '原始请求参数';
 
   root_.innerHTML = `
   <div class="modal-mask">
     <div class="modal card" style="max-width:640px;">
       <div class="card-head">
-        <h2>「${escapeHtml(k.name)}」发送历史</h2>
-        <button class="btn mini" id="hist-close">关闭</button>
+        <h2>${escapeHtml(title)}</h2>
+        <span>
+          <button class="btn mini danger" id="hist-clear">清空</button>
+          <button class="btn mini" id="hist-close">关闭</button>
+        </span>
       </div>
-      <p class="hint">状态说明：<b class="ok">已触达</b> = App 已弹出系统通知；<b class="warn">未触达</b> = App 离线尚未接收。点击「原文」可查看调用方发送的完整未解析参数。</p>
+      <p class="hint xs" style="margin:0 0 8px">${escapeHtml(subtitle || '')}</p>
+      <p class="hint">状态说明：<b class="ok">已触达</b> = App 已弹出系统通知；<b class="warn">未触达</b> = App 离线尚未接收。点击「${rawLabel}」可查看该条通知的完整原始数据。</p>
       <div id="hist-body"><p class="hint">加载中…</p></div>
       <div class="modal-actions" id="hist-pager" style="justify-content:space-between;align-items:center;">
         <span class="hint" id="hist-total"></span>
@@ -771,7 +779,8 @@ async function openKeyHistory(k) {
       </div>
     </div>
   </div>`;
-  $('#hist-close').onclick = () => { document.querySelectorAll('.raw-pop').forEach((p) => p.remove()); root_.innerHTML = ''; };
+  const closeModal = () => { document.querySelectorAll('.raw-pop').forEach((p) => p.remove()); root_.innerHTML = ''; };
+  $('#hist-close').onclick = closeModal;
 
   async function loadPage() {
     const body = $('#hist-body');
@@ -779,16 +788,21 @@ async function openKeyHistory(k) {
     document.querySelectorAll('.raw-pop').forEach((p) => p.remove());
     body.innerHTML = '<p class="hint">加载中…</p>';
     try {
-      const { notifications, total } = await api.listNotifications(k.id, HIST_PAGE_SIZE, page * HIST_PAGE_SIZE);
+      const resp = await api.listNotifications({ keyId, jobId, limit: HIST_PAGE_SIZE, offset: page * HIST_PAGE_SIZE });
+      const { notifications } = resp;
+      total = resp.total;
       const pages = Math.max(1, Math.ceil(total / HIST_PAGE_SIZE));
+      $('#hist-clear').disabled = total === 0;
+      $('#hist-total').textContent = total ? `共 ${total} 条 · 第 ${page + 1} / ${pages} 页` : '';
       if (!notifications.length) {
-        body.innerHTML = '<p class="hint">该 key 还没有发送记录。</p>';
+        body.innerHTML = `<p class="hint">${escapeHtml(emptyText || '还没有记录。')}</p>`;
         $('#hist-pager').style.display = 'none';
         return;
       }
+      $('#hist-pager').style.display = '';
       body.innerHTML = `
         <table>
-          <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th><th>原文</th></tr></thead>
+          <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th><th>${rawLabel}</th></tr></thead>
           <tbody>${notifications.map((n, i) => {
             const empty = !n.body || !String(n.body).trim();
             const status = empty
@@ -808,7 +822,6 @@ async function openKeyHistory(k) {
             </tr>`;
           }).join('')}</tbody>
         </table>`;
-      $('#hist-total').textContent = `共 ${total} 条 · 第 ${page + 1} / ${pages} 页`;
       $('#hist-prev').disabled = page <= 0;
       $('#hist-next').disabled = page >= pages - 1;
       // 「原文」悬浮展示：鼠标悬停在查看上，右侧自动浮现完整未解析 payload
@@ -823,7 +836,7 @@ async function openKeyHistory(k) {
           if (!n || !n.payload) return;
           const pretty = prettyJson(n.payload);
           pop.innerHTML = `
-            <div class="raw-pop-head">通知 #${n.id} 原始请求参数 <button class="btn mini doc-copy">复制</button></div>
+            <div class="raw-pop-head">通知 #${n.id} ${rawTitle} <button class="btn mini doc-copy">复制</button></div>
             <pre>${escapeHtml(pretty)}</pre>`;
           pop.querySelector('.doc-copy').onclick = (e) => { e.stopPropagation(); copyText(pretty, e.target); };
           pop.hidden = false;
@@ -849,6 +862,26 @@ async function openKeyHistory(k) {
 
   $('#hist-prev').onclick = () => { if (page > 0) { page--; loadPage(); } };
   $('#hist-next').onclick = () => { page++; loadPage(); };
+
+  // 清空走服务端 DELETE /api/notifications（带 key_id 或 job_id），不可恢复，必须二次确认
+  $('#hist-clear').onclick = async () => {
+    if (!total) return;
+    const cleared = total;                     // loadPage 会把它重置为 0，先记下来用于提示
+    if (!confirm(`确定清空「${title}」的 ${cleared} 条记录？\n清空后不可恢复。`)) return;
+    try {
+      const r = await api.clearNotifications({ keyId, jobId });
+      page = 0;
+      await loadPage();
+      if (onCleared) onCleared();
+      if (isJob) {
+        const flash = $('#job-flash');
+        if (flash) flash.textContent = `已清空 ${r.deleted ?? cleared} 条日志`;
+      }
+    } catch (err) {
+      alert(`清空失败：${err.message}`);
+    }
+  };
+
   loadPage();
 }
 

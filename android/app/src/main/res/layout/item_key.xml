@@ -49,21 +49,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <Button
-            android:id="@+id/btnTest"
-            android:text="测试"
-            android:textSize="13sp"
-            android:textColor="@color/card"
-            android:background="@drawable/bg_btn_primary"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content" />
-
+        <!-- 不再提供「测试发送」：消息一律由外部系统调 /hook/:key 写入，
+             控制台/App 内的自测按钮既容易让用户误以为需要手动触发，也让 key 的发送历史混入测试数据 -->
         <Button
             android:id="@+id/btnHistory"
             android:text="历史"
             android:textSize="13sp"
-            android:layout_marginStart="8dp"
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content" />

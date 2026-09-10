@@ -4,7 +4,8 @@
 //
 // 定时任务不挂 key：key 是给外部系统调 /hook/:key 用的凭证，与站内定时提醒是两条独立来源。
 // 定时任务直接产生「默认类型」通知 —— 标题 = 任务名称，正文 = 通知内容（留空则同任务名），
-// 不带模板渲染、不占用任何 key，通知的 key_id 为 NULL（也就不会出现在某个 key 的发送历史里）。
+// 不带模板渲染、不占用任何 key，通知的 key_id 为 NULL（也就不会出现在某个 key 的发送历史里），
+// 而是记在 notifications.job_id 上：任务可单独查历史、可清空，删除任务时连带清除。
 import { json, readJson } from './utils.js';
 import { parseSchedule, parseOffset, nextRunAt, describeSchedule } from './schedule.js';
 import { deliver } from './deliver.js';
@@ -54,9 +55,11 @@ async function fireJob(env, job, now) {
   // 1) 先投递。dedup_key 带「计划触发时刻」，配合 5 分钟窗口实现幂等：
   //    并发执行或推进 job 失败后重试，都不会产生重复通知。
   //    keyId=null + keyName='' ：这条通知不属于任何外部 key。
+  //    jobId=job.id：归属到本任务，任务列表能显示「已发送 N 条」，也能按任务看历史 / 清空。
   await deliver(env, {
     userId: job.user_id,
     keyId: null,
+    jobId: job.id,
     keyName: '',
     title: name,
     body: (job.body && String(job.body).trim()) ? job.body : name,
@@ -87,11 +90,24 @@ export async function listJobs(request, env, userId) {
   const rows = await env.DB.prepare(
     `SELECT * FROM jobs WHERE user_id = ? ORDER BY enabled DESC, next_run_at`
   ).bind(userId).all();
+
+  // 每个任务已发出的通知条数（端侧显示「已发送 N 条」）。
+  // 用一条 GROUP BY 聚合，而不是 N 个任务打 N 次 COUNT —— 后者在 50 个任务时就是 50 次 D1 查询。
+  // 命中 idx_notif_job，且 COUNT(*) 走覆盖索引不回表。
+  const cntRows = await env.DB.prepare(
+    `SELECT job_id, COUNT(*) AS c
+       FROM notifications
+      WHERE user_id = ? AND job_id IS NOT NULL
+      GROUP BY job_id`
+  ).bind(userId).all();
+  const sentMap = new Map((cntRows.results || []).map((r) => [Number(r.job_id), Number(r.c)]));
+
   const jobs = (rows.results || []).map((j) => ({
     ...j,
     // 标题固定为任务名称，端侧无需再拼接
     title: j.name || '',
     desc: describeSchedule(j.schedule, j.tz),
+    sent_count: sentMap.get(Number(j.id)) || 0,
   }));
   return json({ jobs });
 }
@@ -162,8 +178,11 @@ export async function updateJob(request, env, userId, id) {
   return json({ ok: true, next_run_at: next, desc: describeSchedule(schedule, tz) });
 }
 
+// 删除任务：连同该任务产生的全部通知历史一并清除。
+// 先删任务行拿到 changes 再删通知 —— 反过来会把「任务不存在」的请求也白删一轮历史。
 export async function deleteJob(request, env, userId, id) {
   const res = await env.DB.prepare('DELETE FROM jobs WHERE id=? AND user_id=?').bind(id, userId).run();
   if (!res.meta.changes) return json({ error: 'job not found' }, 404);
-  return json({ ok: true });
+  const del = await env.DB.prepare('DELETE FROM notifications WHERE user_id=? AND job_id=?').bind(userId, id).run();
+  return json({ ok: true, deleted_history: del.meta.changes || 0 });
 }

@@ -1,6 +1,7 @@
 package com.example.notifyhub.ui
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -280,7 +281,10 @@ class JobsActivity : AppCompatActivity() {
     private fun confirmDelete(job: JobItem) {
         AlertDialog.Builder(this)
             .setTitle("删除定时任务")
-            .setMessage("删除「${job.name ?: "未命名任务"}」？删除后不再触发，已产生的通知历史不受影响。")
+            .setMessage(
+                "删除「${job.name ?: "未命名任务"}」？\n删除后不再触发，" +
+                    "该任务已产生的 ${job.sentCount ?: 0} 条日志将一并清除，不可恢复。"
+            )
             .setPositiveButton("删除") { _, _ ->
                 lifecycleScope.launch {
                     try {
@@ -330,6 +334,7 @@ class JobsActivity : AppCompatActivity() {
             val tvStatus: TextView = v.findViewById(R.id.tvStatus)
             val tvSchedule: TextView = v.findViewById(R.id.tvSchedule)
             val tvMeta: TextView = v.findViewById(R.id.tvMeta)
+            val btnHistory: Button = v.findViewById(R.id.btnHistory)
             val btnEdit: Button = v.findViewById(R.id.btnEdit)
             val btnToggle: Button = v.findViewById(R.id.btnToggle)
             val btnDelete: Button = v.findViewById(R.id.btnDelete)
@@ -357,9 +362,16 @@ class JobsActivity : AppCompatActivity() {
             val lastText = j.lastRunAt?.let { fmtAt(it, j.tz ?: "+08:00") } ?: "从未执行"
             // 通知标题固定为任务名称，正文是通知内容（留空则同任务名），与外部 key 无关
             val content = j.body?.takeIf { it.isNotBlank() } ?: "（与任务名称相同）"
-            h.tvMeta.text = "内容：$content\n下次执行：$nextText · 上次执行：$lastText"
+            h.tvMeta.text = "内容：$content\n下次执行：$nextText · 上次执行：$lastText\n已发送 ${j.sentCount ?: 0} 条日志"
             h.itemView.alpha = if (on) 1f else 0.62f
             h.btnToggle.text = if (on) "停用" else "启用"
+            h.btnHistory.setOnClickListener {
+                val i = Intent(this@JobsActivity, HistoryActivity::class.java)
+                i.putExtra("job_id", j.id)
+                i.putExtra("title", "「${j.name ?: "未命名任务"}」执行日志")
+                i.putExtra("subtitle", "该任务每次触发产生的通知记录")
+                startActivity(i)
+            }
             h.btnEdit.setOnClickListener { openEdit(j) }
             h.btnToggle.setOnClickListener { toggle(j) }
             h.btnDelete.setOnClickListener { confirmDelete(j) }

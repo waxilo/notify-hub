@@ -49,6 +49,7 @@ data class NotificationItem(
     @SerializedName("delivered_at") val deliveredAt: Long?
 )
 data class NotifResp(val notifications: List<NotificationItem>, val total: Int)
+data class ClearResp(val ok: Boolean, val deleted: Int?)
 
 // ---------- 定时任务（配置在服务端，由 Worker Cron 每分钟扫描执行，App 不跑任何定时器） ----------
 // 定时任务不挂 key：key 是外部系统调 /hook/:key 用的凭证。任务触发后直接发默认通知，
@@ -63,6 +64,8 @@ data class JobItem(
     val enabled: Int,
     @SerializedName("next_run_at") val nextRunAt: Long?,
     @SerializedName("last_run_at") val lastRunAt: Long?,
+    // 该任务已产生的日志条数（服务端聚合统计），用于列表展示
+    @SerializedName("sent_count") val sentCount: Int?,
     // 服务端算好的中文描述，如「每 5 分钟」「每天 09:00（+08:00）」
     val desc: String?
 )
@@ -93,11 +96,18 @@ interface NotifyApi {
     @PUT("/api/keys/{id}") suspend fun updateKey(@Path("id") id: Long, @Body req: UpdateKeyReq): Response<Unit>
     // DELETE /api/keys/{id}：彻底删除 key 及其全部发送历史（服务端同一路由）
     @DELETE("/api/keys/{id}") suspend fun deleteKey(@Path("id") id: Long): Response<Unit>
+    // key_id 与 job_id 二选一（都不传 = 全部通知）；Retrofit 对 null 参数不拼进查询串
     @GET("/api/notifications") suspend fun listNotifications(
         @Query("limit") limit: Int = 10,
         @Query("offset") offset: Int = 0,
-        @Query("key_id") keyId: Long? = null
+        @Query("key_id") keyId: Long? = null,
+        @Query("job_id") jobId: Long? = null
     ): NotifResp
+    // 批量清空历史：服务端要求必须带 key_id 或 job_id（刻意不提供「清空全部」）
+    @DELETE("/api/notifications") suspend fun clearNotifications(
+        @Query("key_id") keyId: Long? = null,
+        @Query("job_id") jobId: Long? = null
+    ): ClearResp
     @POST("/api/notifications/{id}/read") suspend fun markRead(@Path("id") id: Long): Response<Unit>
     @POST("/api/notifications/{id}/delivered") suspend fun markDelivered(@Path("id") id: Long): Response<Unit>
     @GET("/api/jobs") suspend fun listJobs(): JobsResp

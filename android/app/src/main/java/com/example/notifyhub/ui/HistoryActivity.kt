@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -19,10 +20,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// 单个 key 的发送历史（只能从 key 卡片进入，不可切换 key）；
-// 分页加载：默认拉取最新 10 条，点击"加载更多"向后追加；
-// 触达状态以服务端 delivered_at 为准（App 弹出通知后回调修正）
-class KeyHistoryActivity : AppCompatActivity() {
+// 通用历史页：一份代码同时服务两种来源（两者在数据上互斥，不会同时有值）
+//   key_id  → 外部系统调 /hook/:key 写入的记录（从首页 key 卡片进入）
+//   job_id  → 定时任务每次触发产生的日志（从定时任务页进入）
+// 除查询维度外两者完全一致：分页加载、触达状态、点击看原文、清空。
+// 清空走服务端 DELETE /api/notifications（必须带 key_id 或 job_id），不可恢复，需二次确认。
+class HistoryActivity : AppCompatActivity() {
 
     private data class Row(
         val item: NotificationItem,
@@ -36,21 +39,28 @@ class KeyHistoryActivity : AppCompatActivity() {
     private lateinit var adapter: HistoryAdapter
     private lateinit var tvMsg: TextView
     private lateinit var btnMore: Button
-    private var keyId: Long = -1L
+    private lateinit var btnClear: Button
+    private var keyId: Long? = null
+    private var jobId: Long? = null
     private var total = 0
 
     private val fmt = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_key_history)
+        setContentView(R.layout.activity_history)
 
-        keyId = intent.getLongExtra("key_id", -1L)
-        if (keyId <= 0) {
-            toast("缺少 key 参数")
+        keyId = intent.getLongExtra("key_id", -1L).takeIf { it > 0 }
+        jobId = intent.getLongExtra("job_id", -1L).takeIf { it > 0 }
+        if (keyId == null && jobId == null) {
+            toast("缺少 key_id / job_id 参数")
             finish()
             return
         }
+
+        val title = intent.getStringExtra("title") ?: "历史记录"
+        findViewById<TextView>(R.id.tvTitle).text = title
+        intent.getStringExtra("subtitle")?.let { findViewById<TextView>(R.id.tvSubtitle).text = it }
 
         adapter = HistoryAdapter(rows)
         val rv = findViewById<RecyclerView>(R.id.rv)
@@ -59,9 +69,11 @@ class KeyHistoryActivity : AppCompatActivity() {
 
         tvMsg = findViewById(R.id.tvMsg)
         btnMore = findViewById(R.id.btnMore)
+        btnClear = findViewById(R.id.btnClear)
         btnMore.setOnClickListener { loadPage(append = true) }
         findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnRefresh).setOnClickListener { loadPage(append = false) }
+        btnClear.setOnClickListener { confirmClear(title) }
 
         loadPage(append = false)
     }
@@ -73,7 +85,7 @@ class KeyHistoryActivity : AppCompatActivity() {
                 val offset = if (append) rows.size else 0
                 if (!append) rows.clear()
                 val resp = Api.safe {
-                    Api.instance(this@KeyHistoryActivity).listNotifications(PAGE_SIZE, offset, keyId)
+                    Api.instance(this@HistoryActivity).listNotifications(PAGE_SIZE, offset, keyId, jobId)
                 }
                 total = resp.total
                 resp.notifications.forEach { n ->
@@ -86,7 +98,8 @@ class KeyHistoryActivity : AppCompatActivity() {
                         }
                     )
                 }
-                tvMsg.text = "已显示 ${rows.size} / 共 $total 条"
+                tvMsg.text = if (total == 0) "暂无记录" else "已显示 ${rows.size} / 共 $total 条"
+                btnClear.isEnabled = total > 0
                 adapter.notifyDataSetChanged()
                 btnMore.visibility = if (rows.size < total) View.VISIBLE else View.GONE
             } catch (e: Exception) {
@@ -95,6 +108,35 @@ class KeyHistoryActivity : AppCompatActivity() {
                 loading.hide()
             }
         }
+    }
+
+    // 清空：二次确认后调服务端，成功则回到第一页重新加载（列表变空态）
+    private fun confirmClear(title: String) {
+        if (total <= 0) return
+        val n = total            // loadPage 会把它刷新为 0，先记下来用于提示
+        AlertDialog.Builder(this)
+            .setTitle("清空历史")
+            .setMessage("确定清空「$title」的 $n 条记录？\n清空后不可恢复。")
+            .setPositiveButton("清空") { _, _ ->
+                loading.show()
+                lifecycleScope.launch {
+                    try {
+                        Api.safe {
+                            Api.instance(this@HistoryActivity).clearNotifications(keyId, jobId)
+                        }
+                        rows.clear()
+                        adapter.notifyDataSetChanged()
+                        loadPage(append = false)
+                        toast("已清空 $n 条记录")
+                    } catch (e: Exception) {
+                        toast("清空失败：${e.message}")
+                    } finally {
+                        loading.hide()
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
@@ -122,14 +164,14 @@ class KeyHistoryActivity : AppCompatActivity() {
             h.tvStatus.text = row.status
             h.tvStatus.setTextColor(row.statusColor)
             h.tvStatus.setBackgroundResource(row.chipBg)
-            // 点击条目查看原始请求参数（完整、未解析的 payload）
+            // 点击条目查看原始数据（key 历史是调用方原始参数，任务日志是触发详情）
             h.itemView.setOnClickListener { showRawPayload(n) }
         }
 
         override fun getItemCount() = data.size
     }
 
-    // 弹窗展示调用方发送的原始参数：JSON 尽量格式化，纯文本原样展示，可复制
+    // 弹窗展示该条通知的原始数据：JSON 尽量格式化，纯文本原样展示，可复制
     private fun showRawPayload(n: NotificationItem) {
         val raw = n.payload
         if (raw.isNullOrBlank()) {
@@ -150,8 +192,8 @@ class KeyHistoryActivity : AppCompatActivity() {
             setPadding(48, 32, 48, 32)
         }
         val scroll = android.widget.ScrollView(this).apply { addView(tv) }
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("原始请求参数（#${n.id}）")
+        AlertDialog.Builder(this)
+            .setTitle(if (jobId != null) "触发详情（#${n.id}）" else "原始请求参数（#${n.id}）")
             .setView(scroll)
             .setPositiveButton("复制") { _, _ ->
                 val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager

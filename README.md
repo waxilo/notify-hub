@@ -34,6 +34,7 @@ notify-hub/
 │   ├── src/     # index.js(路由) auth.js keys.js notifications.js webhook.js utils.js
 │   │            # jobs.js(定时任务 CRUD+执行) schedule.js(预设串解析) deliver.js(投递公共函数) push.js(DO)
 │   ├── migrations/0001_init.sql  0002_schema_sync.sql  0003_jobs.sql  0004_jobs_detach_key.sql
+│   │             0005_notifications_job_id.sql  0006_notifications_job_index.sql
 │   └── wrangler.toml
 ├── pages/       # Cloudflare Pages 静态控制台（仅配置，无构建）
 │   ├── index.html  styles.css  src/{config,api,app}.js
@@ -70,12 +71,16 @@ wrangler secret put JWT_SECRET
 > ⚠️ **wrangler v4 的 `d1 execute` 默认只操作本地库**，对线上库必须显式加 `--remote`。不加的话命令会"成功"但线上表根本没建，之后应用全部 500。
 
 ```bash
-# 分四个文件，按顺序执行（也可一条 npm run migrate:all 全跑）
+# 分六个文件，按顺序执行（全新库也可一条 npm run migrate:all 全跑）
 npm run migrate        # 0001：基础三张表（users / keys / notifications）
 npm run migrate:sync   # 0002：补齐 0001 之后手工 ALTER 出来的字段（不幂等，列已存在会报 duplicate column）
 npm run migrate:jobs   # 0003：定时任务表 jobs + 扫描索引（幂等，可重复执行）
 npm run migrate:detach # 0004：清空 jobs.key_id —— 定时任务与外部 key 解耦（幂等，可重复执行）
+npm run migrate:notifjob # 0005：notifications 增加 job_id —— 任务日志可单独检索/清空（不幂等，只能跑一次）
+npm run migrate:notifidx # 0006：job_id 检索索引 idx_notif_job（幂等，可重复执行）
 ```
+
+> `migrate:all` 里含 0002 / 0005 两个**不幂等**的 ALTER，只适合全新库一次性跑完；已有库请只跑自己缺的那几个幂等文件。
 
 说明：
 
@@ -106,16 +111,18 @@ npm run deploy
    或在 `worker/` 下一键：`npm run deploy:pages`。
    也可在 Cloudflare Pages 控制台连接仓库、构建输出目录设为 `pages/`、无需构建命令。
 
-Web 控制台只做配置：**注册/登录 → 生成 Key（页面会给出完整 key 与 webhook 地址）→ 吊销 Key → 创建定时任务 → 修改密码**。
+Web 控制台只做配置：**注册/登录 → 生成 Key（页面会给出完整 key 与 webhook 地址）→ 查看/清空某个 Key 的发送历史 → 吊销 Key → 创建定时任务 → 查看/清空任务日志 → 修改密码**。
+控制台与 App 里都**没有「发送测试消息」入口** —— 消息一律由外部系统调 `/hook/:key` 写入，否则测试数据会混进真实历史。
 
 ---
 
 ## 三、安卓 App
 
 1. 用 **Android Studio** 打开 `android/` 目录（会生成 Gradle wrapper）。
-2. 首次进入 App 的「设置」页，填入 Worker 地址（`API_BASE`）与轮询间隔（秒）。
-3. 登录/注册后，通知收件箱会自动轮询拉取。
-4. 点击某条通知可标记已读。
+2. 首次进入 App 的「设置」页，填入 Worker 地址（`API_BASE`）。
+3. 登录/注册后进入首页：底部三个页签 —— **首页（Key 管理）/ 定时任务 / 设置**。前台服务会保持 WebSocket 长连接，服务端有通知即刻弹出系统通知，离线消息在重新上线后由服务端重推。
+4. Key 卡片提供「历史」（可查看与清空该 key 的写入记录）与「编辑」；长按卡片可删除 key（连同其历史）。
+5. 定时任务卡片提供「日志」（可查看与清空该任务的触发记录）、编辑、启停、删除；删除任务会连同其日志一并清除。
 
 > 每次推送到 `main` 会由 CI 自动构建并发布 APK（见下节），无需本地 Android SDK。
 
@@ -158,13 +165,15 @@ gh release download latest -p "*.apk"                 # 手动下载 APK
 | POST | `/api/keys` | 生成 key `{name}` → `{id,key}` | 是 |
 | GET  | `/api/keys` | 列出我的 key（掩码） | 是 |
 | DELETE | `/api/keys/:id` | 吊销 key | 是 |
-| GET  | `/api/notifications?limit=50` | 拉取通知 | 是 |
+| GET  | `/api/notifications?limit=50` | 拉取通知（可加 `key_id=` 按外部 key 过滤、`job_id=` 按定时任务过滤） | 是 |
+| DELETE | `/api/notifications?key_id=N` | 清空某个 key 的全部历史（**必须带 key_id 或 job_id**，否则 400） | 是 |
+| DELETE | `/api/notifications?job_id=N` | 清空某个定时任务的全部日志 | 是 |
 | POST | `/api/notifications/:id/read` | 标记已读 | 是 |
-| DELETE | `/api/notifications/:id` | 删除通知 | 是 |
-| GET  | `/api/jobs` | 列出我的定时任务 | 是 |
+| DELETE | `/api/notifications/:id` | 删除单条通知 | 是 |
+| GET  | `/api/jobs` | 列出我的定时任务（含 `sent_count` = 已产生日志条数） | 是 |
 | POST | `/api/jobs` | 新建任务 `{name,schedule,tz,body,enabled}` | 是 |
 | PUT  | `/api/jobs/:id` | 修改任务（含启停，改计划会重算下次执行时刻） | 是 |
-| DELETE | `/api/jobs/:id` | 删除任务 | 是 |
+| DELETE | `/api/jobs/:id` | 删除任务（**连带清除该任务的日志**） | 是 |
 | GET/POST | `/hook/:key` | **通用 webhook**（无需鉴权） | 否 |
 
 ### Webhook 用法示例
@@ -194,6 +203,7 @@ curl -X POST "https://notify-hub-worker.<sub>.workers.dev/hook/<KEY>" \
 | 执行位置 | 服务端。App 离线、进程被杀、浏览器关闭都不影响触发 |
 | 通知来源 | **不挂 key**。Key 是外部系统调 `/hook/:key` 的凭证，定时任务是站内自己产生的提醒，两者互不相干 —— 建任务不需要先造通道。触发后直接发「默认类型」通知：标题 = 任务名称，正文 = 通知内容（留空则同任务名），通知的 `key_id` 为 NULL，因此不会出现在任何 key 的发送历史里 |
 | schedule 预设串 | `every:5m` / `every:2h` / `daily:09:00` / `weekly:1,09:00` / `once:2026-09-10T09:30` |
+| 日志与清空 | 每次触发产生的通知记在 `notifications.job_id` 上，任务列表显示「已发送 N 条」，可进「日志」页查看明细并清空；删除任务时连同日志一并删除 |
 | 时区 | **不对用户开放修改**：新建任务取设备/浏览器当前 UTC 偏移，编辑时沿用创建时的时区。存为固定偏移（`+08:00`），创建时即换算为 `next_run_at` 绝对时间戳 |
 | 防重 | `dedup_key = job:{id}:{计划时刻}`，5 分钟窗口内幂等；并发由 `next_run_at` 乐观锁兜底 |
 | 停机补偿 | **不补触发**：长时间不可用后恢复，直接跳到下一个未来时刻 |

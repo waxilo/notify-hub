@@ -5,13 +5,16 @@ import { json } from './utils.js';
 
 const DEDUP_WINDOW_MS = 300_000;   // 5 分钟防重窗口
 
-// opts: { userId, keyId, keyName, title, body, payload, dedupKey, dedup }
+// opts: { userId, keyId, jobId, keyName, title, body, payload, dedupKey, dedup }
+//   jobId：定时任务触发时传入，用于把这条通知归到某个任务名下（可单独查历史 / 清空）。
+//          外部 webhook 写入时留空，那类通知记在 keyId 上。
 //   dedup=true 时按 dedupKey 在窗口内去重（job 用；webhook 仅当调用方显式传 key 时用）
 // 返回 { id, deduplicated?, empty? }
 export async function deliver(env, opts) {
   const {
     userId,
     keyId = null,
+    jobId = null,
     keyName = '',
     title = '',
     body = '',
@@ -32,8 +35,8 @@ export async function deliver(env, opts) {
   }
 
   const res = await env.DB.prepare(
-    'INSERT INTO notifications (user_id, key_id, dedup_key, title, body, payload, created_at, read) VALUES (?,?,?,?,?,?,?,0)'
-  ).bind(userId, keyId, dk, t, b, payload, Date.now()).run();
+    'INSERT INTO notifications (user_id, key_id, job_id, dedup_key, title, body, payload, created_at, read) VALUES (?,?,?,?,?,?,?,?,0)'
+  ).bind(userId, keyId, jobId, dk, t, b, payload, Date.now()).run();
   const id = res.meta.last_row_id;
   if (id == null) return { id: null, error: 'insert failed' };
 

@@ -17,7 +17,11 @@
     "migrate:jobs:local": "wrangler d1 execute notify-hub --local --file=./migrations/0003_jobs.sql",
     "migrate:detach": "wrangler d1 execute notify-hub --remote --file=./migrations/0004_jobs_detach_key.sql",
     "migrate:detach:local": "wrangler d1 execute notify-hub --local --file=./migrations/0004_jobs_detach_key.sql",
-    "migrate:all": "npm run migrate && npm run migrate:sync && npm run migrate:jobs && npm run migrate:detach"
+    "migrate:notifjob": "wrangler d1 execute notify-hub --remote --file=./migrations/0005_notifications_job_id.sql",
+    "migrate:notifjob:local": "wrangler d1 execute notify-hub --local --file=./migrations/0005_notifications_job_id.sql",
+    "migrate:notifidx": "wrangler d1 execute notify-hub --remote --file=./migrations/0006_notifications_job_index.sql",
+    "migrate:notifidx:local": "wrangler d1 execute notify-hub --local --file=./migrations/0006_notifications_job_index.sql",
+    "migrate:all": "npm run migrate && npm run migrate:sync && npm run migrate:jobs && npm run migrate:detach && npm run migrate:notifjob && npm run migrate:notifidx"
   },
   "devDependencies": {
     "wrangler": "^3.78.0"

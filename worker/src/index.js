@@ -2,7 +2,7 @@
 import { json } from './utils.js';
 import { register, login, changePassword, verifyJWT } from './auth.js';
 import { createKey, listKeys, updateKey, deleteKey } from './keys.js';
-import { listNotifications, getNotification, markRead, markDelivered, deleteNotification } from './notifications.js';
+import { listNotifications, getNotification, markRead, markDelivered, deleteNotification, clearNotifications } from './notifications.js';
 import { handleWebhook } from './webhook.js';
 import { PushHub } from './push.js';
 import { appLatest, appDownload } from './appupdate.js';
@@ -90,11 +90,17 @@ export default {
         return deleteKey(request, env, uid, p.split('/')[2]);
       }
 
-      // 通知（支持 ?key_id= 按 key 过滤，供发送历史查询）
+      // 通知（支持 ?key_id= 按外部 key 过滤、?job_id= 按定时任务过滤，供历史查询）
       if (p === '/notifications' && request.method === 'GET') {
         const uid = await getUserId(request, env);
         const e = requireAuth(uid); if (e) return e;
         return listNotifications(request, env, uid);
+      }
+      // 批量清空历史：必须带 ?key_id= 或 ?job_id=（不提供清空全部）
+      if (p === '/notifications' && request.method === 'DELETE') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return clearNotifications(request, env, uid);
       }
       if (p.startsWith('/notifications/') && p.endsWith('/delivered') && request.method === 'POST') {
         const uid = await getUserId(request, env);

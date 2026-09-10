@@ -1,0 +1,14 @@
+-- 0005：notifications 增加 job_id —— 定时任务产生的通知从此可以单独检索与清空
+--
+-- 执行（⚠️ 必须带 --remote，wrangler 的 d1 execute 默认只操作本地库）：
+--   wrangler d1 execute notify-hub --remote --file=./migrations/0005_notifications_job_id.sql
+--
+-- ⚠️ 本文件**不幂等**：SQLite 的 ALTER TABLE ADD COLUMN 没有 IF NOT EXISTS，
+--    重复执行会报 duplicate column name: job_id，而 wrangler --file 是整批原子执行
+--    （一条失败全部回滚）。所以索引单独放在 0006，本文件只跑一次。
+--
+-- 语义：job_id 为 NULL = 外部系统经 /hook/:key 写入（那类通知记在 key_id 上）；
+--       job_id 非空 = 站内定时任务触发产生（那类通知的 key_id 恒为 NULL）。
+--       两个维度互不重叠，所以「按 key 清空」不会误伤定时任务的历史，反之亦然。
+-- 旧数据（本列加入前产生的 job 通知）job_id 为 NULL，无法回溯归属，只能留在历史里。
+ALTER TABLE notifications ADD COLUMN job_id INTEGER;

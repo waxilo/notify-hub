@@ -63,9 +63,18 @@
         android:layout_height="wrap_content">
 
         <Button
+            android:id="@+id/btnHistory"
+            android:text="日志"
+            android:textSize="13sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content" />
+
+        <Button
             android:id="@+id/btnEdit"
             android:text="编辑"
             android:textSize="13sp"
+            android:layout_marginStart="8dp"
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content" />

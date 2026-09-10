@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 通用历史页：既服务「外部 key 的写入历史」也服务「定时任务的执行日志」，
+     由 HistoryActivity 按 intent 里的 key_id / job_id 决定查哪一份。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:orientation="vertical"
     android:background="@color/bg"
@@ -31,8 +33,8 @@
             android:layout_height="wrap_content">
 
             <TextView
-                android:id="@+id/tvKeyName"
-                android:text="发送历史"
+                android:id="@+id/tvTitle"
+                android:text="历史记录"
                 android:textSize="17sp"
                 android:textStyle="bold"
                 android:textColor="@color/text_main"
@@ -42,9 +44,11 @@
                 android:layout_height="wrap_content" />
 
             <TextView
+                android:id="@+id/tvSubtitle"
                 android:text="已触达 = App 已弹出通知；未触达 = 尚未在线接收"
                 android:textSize="11sp"
                 android:textColor="@color/text_muted"
+                android:maxLines="2"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
         </LinearLayout>
@@ -57,15 +61,34 @@
             android:layout_height="wrap_content" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/tvMsg"
-        android:textSize="12sp"
-        android:textColor="@color/text_muted"
+    <LinearLayout
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
         android:paddingStart="16dp"
-        android:paddingEnd="16dp"
+        android:paddingEnd="12dp"
         android:paddingBottom="2dp"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:id="@+id/tvMsg"
+            android:textSize="12sp"
+            android:textColor="@color/text_muted"
+            android:layout_weight="1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content" />
+
+        <Button
+            android:id="@+id/btnClear"
+            android:text="清空"
+            android:textSize="12sp"
+            android:textColor="@color/danger"
+            android:minWidth="0dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+    </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv"
