@@ -2,12 +2,15 @@
 // 执行完全在服务端：Cron Triggers 每分钟唤醒一次 → 扫 jobs 表 → 到期的写通知并推送。
 // App / Web 只负责配置，端侧不需要任何定时器代码（也就没有 Doze、进程被杀、多端重复执行的问题）。
 //
+// 时间统一按「整分钟」粒度：next_run_at 生成时丢秒，到期比较时也丢秒（见 schedule.js 的 floorMinute）。
+// 创建时刻与 Cron 到达时刻的「秒」都不可控，不丢秒就会让同分钟内的 tick 被判为未到期、整条提醒晚一分钟。
+//
 // 定时任务不挂 key：key 是给外部系统调 /hook/:key 用的凭证，与站内定时提醒是两条独立来源。
 // 定时任务直接产生「默认类型」通知 —— 标题 = 任务名称，正文 = 通知内容（留空则同任务名），
 // 不带模板渲染、不占用任何 key，通知的 key_id 为 NULL（也就不会出现在某个 key 的发送历史里），
 // 而是记在 notifications.job_id 上：任务可单独查历史、可清空，删除任务时连带清除。
 import { json, readJson } from './utils.js';
-import { parseSchedule, parseOffset, nextRunAt, describeSchedule } from './schedule.js';
+import { parseSchedule, parseOffset, nextRunAt, describeSchedule, floorMinute } from './schedule.js';
 import { deliver } from './deliver.js';
 
 const MAX_PER_TICK = 100;        // 单 tick 最多执行的 job 数，超出顺延到下一分钟
@@ -15,9 +18,11 @@ const MAX_JOBS_PER_USER = 50;
 
 /* ---------------- Cron 扫描执行 ---------------- */
 
-// nowMs 用 controller.scheduledTime（计划触发时刻），不用 Date.now()，避免把 tick 延迟带进递推
+// nowMs 用 controller.scheduledTime（计划触发时刻），不用 Date.now()，避免把 tick 延迟带进递推。
+// 再对齐到整分钟：next_run_at 也是整分钟粒度，两边同粒度比较，「秒」彻底不参与判定
+// （计划 21:12:00 在 tick 21:12:10 命中；tick 21:11:59 不会提前触发）。
 export async function runDueJobs(env, nowMs) {
-  const now = Number(nowMs) || Date.now();
+  const now = floorMinute(Number(nowMs) || Date.now());
   if (!env || !env.DB) return { scanned: 0, fired: 0, errors: 0, skipped: true };
 
   // 命中 idx_jobs_due：扫到的行数 = 到期 job 数，没有到期时读取行数接近 0

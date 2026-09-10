@@ -9,6 +9,13 @@
 //
 // 关键约定：next_run_at 是「绝对毫秒时间戳」，创建/改计划时按 tz 一次换算完，
 // 之后所有比较都是时间戳比大小，执行端与服务器时区无关。
+//
+// 秒对齐（重要）：所有计划时刻一律对齐到整分钟，秒与毫秒全部丢弃。
+//   因为「秒」在两个方向上都是不准的：任务创建时刻带秒（Date.now() 的 21:11:30），
+//   Cron 到达时刻也带秒（触发落在分钟内任意一刻，如 21:12:10）。
+//   若把创建时刻的秒带进 next_run_at，every:1m 的首个计划会落在 21:12:30，
+//   于是 21:12:10 那次 tick 会因「计划时刻还没到」被判为未到期 —— 提醒整整晚一分钟。
+//   对齐后计划时刻是 21:12:00，该分钟内的任意 tick（21:12:00 / 21:12:10 / 21:12:59）都能触发。
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
@@ -29,6 +36,11 @@ export function parseOffset(tz) {
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');
+
+// 对齐到整分钟：整套实现里「计划时刻」的唯一粒度。
+// 既用于生成 next_run_at（丢秒），也用于到期比较（tick 的秒不参与判定），
+// 保证「计划 21:12:00 + tick 21:12:10」能命中，而 21:11:59 不会提前触发。
+export const floorMinute = (ms) => Math.floor((Number(ms) || 0) / MINUTE) * MINUTE;
 
 // 预设串 → 结构化描述；非法返回 null
 export function parseSchedule(s) {
@@ -78,9 +90,10 @@ export function parseSchedule(s) {
   return null;
 }
 
-// 计算下次触发时刻（毫秒时间戳）
+// 计算下次触发时刻（毫秒时间戳），返回值恒为整分钟对齐
 //   nowMs  当前时间（用 Cron 的 scheduledTime，不是 Date.now()，避免把 tick 延迟带进递推）
 //   prevMs 上一次「计划」触发时刻，间隔型基于它递推，防止延迟累积漂移
+//          （间隔型会先把它对齐到整分钟，因此传入带秒的旧数据也能自愈）
 //   once 类型返回固定时刻（可能已过期，由调用方在执行后禁用）
 export function nextRunAt(schedule, offsetMin, nowMs, prevMs) {
   const p = typeof schedule === 'string' ? parseSchedule(schedule) : schedule;
@@ -91,7 +104,9 @@ export function nextRunAt(schedule, offsetMin, nowMs, prevMs) {
   if (p.kind === 'once') return p.localMs - off;
 
   if (p.kind === 'interval') {
-    const base = Number(prevMs) || now;
+    // base 对齐整分钟：一是让首个计划落在整分钟（丢掉创建时刻的秒），
+    // 二是让库里遗留的「带秒 next_run_at」在下次触发时自动自愈，无需数据迁移。
+    const base = floorMinute(Number(prevMs) || now);
     if (base > now) return base;                       // 计划时刻还在未来，不动
     const k = Math.floor((now - base) / p.intervalMs) + 1;
     return base + k * p.intervalMs;                    // 跳过停机期间错过的次数，不补触发

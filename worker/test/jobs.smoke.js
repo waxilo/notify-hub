@@ -7,6 +7,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { runDueJobs, deleteJob, listJobs, createJob, updateJob } from '../src/jobs.js';
+import { nextRunAt } from '../src/schedule.js';
 import { clearNotifications } from '../src/notifications.js';
 import { deleteKey, updateKey } from '../src/keys.js';
 import { handleWebhook } from '../src/webhook.js';
@@ -87,8 +88,9 @@ ck('通知不挂 key_id', db.prepare('SELECT key_id FROM notifications').get().k
 ck('通知归到 job_id', db.prepare('SELECT job_id FROM notifications').get().job_id === id1,
   'job_id=' + db.prepare('SELECT job_id FROM notifications').get().job_id);
 let j = db.prepare('SELECT * FROM jobs WHERE id=?').get(id1);
-// 间隔基于「计划时刻」递推而非当前时间，所以是 (now-1000)+5m，不是 now+5m（避免漂移）
-ck('next_run_at 已推进', j.next_run_at === now - 1000 + 5 * 60000, String(j.next_run_at - now));
+// 间隔基于「计划时刻」递推而非当前时间，避免漂移；且该基准先对齐整分钟（丢弃创建/执行时刻的秒），
+// 所以是 floor(now-1000)+5m = 09:04:00，不是 (now-1000)+5m
+ck('next_run_at 已推进', j.next_run_at === now + 4 * 60000, String(j.next_run_at - now));
 ck('last_run_at 已写入', j.last_run_at === now - 1000, String(j.last_run_at));
 ck('dedup_key 带计划时刻', db.prepare('SELECT dedup_key FROM notifications').get().dedup_key === `job:${id1}:${now - 1000}`);
 
@@ -102,7 +104,8 @@ ck('5 分钟后再次触发', r.fired === 1);
 ck('累计 2 条通知', db.prepare('SELECT COUNT(*) c FROM notifications').get().c === 2);
 
 // 4) 并发/重入：把 next_run_at 拨回「已执行过的同一时刻」再跑一次，dedup_key 应拦住重复通知
-db.prepare('UPDATE jobs SET next_run_at=? WHERE id=?').run(now + 5 * 60000 - 1000, id1);
+//    （用上一次真正触发过的计划时刻 now+4m，即 09:04:00，dedup_key 才会命中窗口）
+db.prepare('UPDATE jobs SET next_run_at=? WHERE id=?').run(now + 4 * 60000, id1);
 const before = db.prepare('SELECT COUNT(*) c FROM notifications').get().c;
 await runDueJobs(env, now + 5 * 60000);
 ck('重复执行被 dedup 拦截', db.prepare('SELECT COUNT(*) c FROM notifications').get().c === before,
@@ -343,6 +346,39 @@ await updateJob(new Request('https://x/api/jobs/' + newJobId, {
 }), env, 1, newJobId);
 ck('updateJob 不传开关时保留原值',
   db.prepare('SELECT strong_vibrate FROM jobs WHERE id=?').get(newJobId).strong_vibrate === 1);
+
+/* ---------------- 秒对齐（创建时刻与 Cron 到达时刻的秒都不可控） ---------------- */
+
+// 20) 计划的「秒」不参与判定。
+//     场景：21:11:30 创建 every:1m，21:12:10 那次 cron tick 必须触发 ——
+//     旧实现把创建时刻的 :30 带进 next_run_at(21:12:30)，21:12:10 会被判为未到期，整条提醒晚一分钟。
+const L = (h, mi, s = 0) => Date.UTC(2026, 8, 10, h - 8, mi, s);   // 本地(+08:00) 2026-09-10 → UTC 毫秒
+
+ck('间隔型首次计划丢弃创建时刻的秒',
+  nextRunAt('every:1m', 480, L(21, 11, 30), L(21, 11, 30)) === L(21, 12, 0),
+  new Date(nextRunAt('every:1m', 480, L(21, 11, 30), L(21, 11, 30))).toISOString());
+
+// 20.1 计划时刻 21:12:00：该分钟内任意一秒的 tick 都能命中，前一分钟则不提前触发
+const idSec = insertJob('every:1m', L(21, 12, 0));
+await runDueJobs(env, L(21, 11, 59));
+ck('未到计划分钟不提前触发', countJob(idSec) === 0, 'c=' + countJob(idSec));
+await runDueJobs(env, L(21, 12, 10));
+ck('tick 落在分钟后 10 秒仍触发', countJob(idSec) === 1, 'c=' + countJob(idSec));
+ck('推进后的计划时刻仍是整分钟',
+  db.prepare('SELECT next_run_at FROM jobs WHERE id=?').get(idSec).next_run_at === L(21, 13, 0),
+  String(db.prepare('SELECT next_run_at FROM jobs WHERE id=?').get(idSec).next_run_at - L(21, 13, 0)));
+await runDueJobs(env, L(21, 12, 59));
+ck('同一分钟内重复扫描不重复触发', countJob(idSec) === 1, 'c=' + countJob(idSec));
+db.prepare('DELETE FROM jobs WHERE id=?').run(idSec);
+
+// 20.2 库里遗留的「带秒 next_run_at」（这次改动之前建的周期任务）在下次触发时自愈，无需数据迁移
+const idLegacy = insertJob('every:1m', L(21, 20, 30));
+await runDueJobs(env, L(21, 21, 0));
+ck('遗留带秒数据仍能触发', countJob(idLegacy) === 1, 'c=' + countJob(idLegacy));
+ck('遗留带秒数据自愈为整分钟',
+  db.prepare('SELECT next_run_at FROM jobs WHERE id=?').get(idLegacy).next_run_at === L(21, 22, 0),
+  String(db.prepare('SELECT next_run_at FROM jobs WHERE id=?').get(idLegacy).next_run_at - L(21, 22, 0)));
+db.prepare('DELETE FROM jobs WHERE id=?').run(idLegacy);
 
 console.log(bad ? '\n' + bad + ' FAILED' : '\nALL PASS');
 process.exit(bad ? 1 : 0);
