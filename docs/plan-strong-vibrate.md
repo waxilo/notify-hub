@@ -1480,3 +1480,72 @@ BAL 与「后台弹出界面」都管辖不到它，只需要悬浮窗权限 —
 （少数深度定制 ROM 如此）—— 那就只剩「震动 + 横幅」这一形态，
 而震动本来就不受这些限制，仍是最可靠的叫醒手段。
 
+---
+
+## 26. 放弃全屏：移除三条通道，回归「横幅 + 持续震动」（2026-09-10）
+
+### 26.1 结论
+
+第 22–25 章连续三次尝试全屏，全都在用户真机上失败：
+
+| 迭代 | 手段 | 结果 |
+|---|---|---|
+| 第 22 章 | `SYSTEM_ALERT_WINDOW` 后服务自拉 Activity | ❌ 仍只有横幅 |
+| 第 23 章 | 补「可见窗口」例外（1×1 overlay）+ PendingIntent 显式 opt-in | ❌ 仍只有横幅 |
+| 第 25 章 | 完全绕开 Activity 启动，把告警页画成 `TYPE_APPLICATION_OVERLAY` 全屏悬浮窗 | ❌ 仍只有横幅 |
+
+第 25 章那条**已经不经过 Activity 启动**，BAL 与厂商「后台弹出界面」都管辖不到它 ——
+它仍然失败，说明该 ROM 连「应用悬浮窗覆盖锁屏」本身也禁止。这已属**系统侧不可控项**，
+继续加通道只会堆积代码而不会改变结果。
+
+于是改为**主动收窄范围**：视觉提醒统一为一条横幅通知，「确保被注意到」由持续震动单独承担 ——
+震动从一开始就不依赖任何界面是否被拉起，是这套方案里唯一 100% 可靠的通道。
+
+### 26.2 移除清单
+
+| 文件 | 移除内容 |
+|---|---|
+| `PushService.kt` | `tryLaunchAlarmDirectly` / `launchAlarmOnMain` / `showLaunchOverlay` / `hideLaunchOverlay` / `showAlarmOverlay` / `hideAlarmOverlay` / `wakeScreenBriefly` / `sendAlarmIntent` / `recordLaunchResult` / `logFsiFacts` / `retractHeadsUp` |
+| `PushService.kt` | `buildMessageNotification` 的 `fullScreenIntent` 分支、`FS_REQUEST_OFFSET`、`withFullScreen` 判定；`EXTRA_NOTIF_ID` 与「停震并撤通知」分支；直拉/悬浮窗的全部字段与常量；`canUseFullScreenIntent()` / `canDrawOverlays()` / `lastLaunchResult()` |
+| `PushService.kt` | 18 个已无用途的 import（`ActivityOptions`、`KeyguardManager`、`PixelFormat`、`SystemClock`、`Settings`、`Gravity`、`LayoutInflater`、`View`、`WindowManager`、`PowerManager`、`Button`、`TextView`、`R` 等） |
+| `AlarmActivity.kt`、`activity_alarm.xml` | 整文件删除 —— 它只服务于「全屏告警页」这一个目的 |
+| `AndroidManifest.xml` | `USE_FULL_SCREEN_INTENT`、`SYSTEM_ALERT_WINDOW`、`WAKE_LOCK` 三项权限 + `AlarmActivity` 声明 |
+| `SettingsActivity.kt` | 全屏通知状态行、悬浮窗状态行、「上次强力提醒」结论行，及其三个跳转方法与相关 import |
+| `activity_settings.xml` | `tvFsiStatus` / `btnFsiSetting` / `tvOverlayStatus` / `btnOverlaySetting` / `tvLastLaunch` 五个控件与三段说明文字 |
+
+### 26.3 保留与调整
+
+**保留**：持续震动（循环波形 `0,700,500`、30 秒超时、通知被禁用时不震）、横幅通知
+（渠道 `notify_hub_push_v2`、静音、`VISIBILITY_PUBLIC`）、防重缓存、已触达回调。
+
+调整两处语义：
+
+- **点击强震横幅 → 主界面并停震**（原先指向告警页）。复用 `KeysActivity.handleStopVibrate()`：
+  通知的 contentIntent 带 `EXTRA_STOP_VIBRATE=true`，`KeysActivity` 见到就发一次停止广播。
+  普通消息带 `false`，因此不会误停另一条强震消息 —— 这个区分从第 20 章起就存在，现在把落点从
+  告警页改回主界面。
+- **通知分类改回 `CATEGORY_MESSAGE`**。`CATEGORY_ALARM` 是专为 FSI 判定放宽而选的
+  （官方把 FSI 的合法用途限定为来电/闹钟），全屏既然移除，就没必要再借闹钟的语义。
+- **`retractHeadsUp()` 一并删除**。它存在的唯一理由是「持 `USE_FULL_SCREEN_INTENT` 时，
+  解锁态那条横幅是 persistent、不会自己消失」；权限移除后横幅几秒后自动收回通知栏，
+  超时只需停震。
+
+### 26.4 最终的停止路径（三条）
+
+| 入口 | 行为 |
+|---|---|
+| 点击强震横幅 | 进主界面 + 立即停震 |
+| 滑掉通知 | 停震（`deleteIntent` → `startService`，见第 19 章的版本差异说明） |
+| 30 秒超时 | 停震 |
+
+### 26.5 设置页文案
+
+「提醒权限」卡片收敛为**两项检测**：通知权限、推送渠道重要性。说明文字改为如实描述：
+
+> 强力提醒 = 无声横幅 + 持续震动（最长 30 秒）。点击横幅、滑掉通知都会立即停止震动。
+> 震动由后台连接直接驱动，与是否锁屏、是否静音、是否处于勿扰无关；但需要上面两项都正常……
+> 若长时间收不到提醒，请再到系统「应用信息」里允许后台运行。
+
+主动删掉「全屏」「悬浮窗」「后台弹出界面」等已不再适用的话术 —— 保留一个做不到的承诺，
+比不承诺更糟。
+

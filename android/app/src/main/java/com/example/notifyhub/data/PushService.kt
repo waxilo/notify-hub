@@ -1,7 +1,5 @@
 package com.example.notifyhub.data
 
-import android.app.ActivityOptions
-import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -11,27 +9,15 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.PowerManager
-import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.provider.Settings
-import android.view.Gravity
-import android.view.LayoutInflater
-import android.view.View
-import android.view.WindowManager
-import android.widget.Button
-import android.widget.TextView
 import com.example.notifyhub.LogHelper
-import com.example.notifyhub.R
 import com.example.notifyhub.api.Api
-import com.example.notifyhub.ui.AlarmActivity
 import com.example.notifyhub.ui.KeysActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,18 +32,17 @@ import java.util.concurrent.TimeUnit
 
 // 前台服务：维持与 Worker 的 WebSocket 长连接，收到推送立即弹系统通知
 //
-// 强力震动（vibrate=true 的消息）在本服务内完成，**不放在 Activity**：
-// 全屏 Intent（FSI）只在锁屏/灭屏时真正拉起 Activity，解锁态下系统一律降级为横幅、
-// Activity 根本不启动 —— 把震动绑在 Activity 生命周期上，恰好在最需要它的场景直接失效。
-// 震动在这里只是「马达直调」，不受锁屏/亮屏、静音模式、勿扰策略影响。
+// 视觉提醒统一为**一条横幅通知**（点开进主界面），不做全屏告警页。
+// 原因：全屏必须依赖 fullScreenIntent，而它必然要「启动一个 Activity」，
+// 于是受 Android 10+ 的后台启动限制（BAL）与国产 ROM 的「后台弹出界面」开关管辖 ——
+// 这两道闸门都在系统侧、普通应用无法自行争取（系统闹钟等预装应用在白名单里），
+// 实测多台设备上「通知权限 + 全屏通知 + 悬浮窗」全开仍会被拦下。属不可控项，故放弃。
 //
-// 全屏告警页走三条通道，互不替代、哪条被系统放行就走哪条：
-//   ① 通知的 fullScreenIntent（请系统代为启动，由系统判定是否放行）
-//   ② 拿到悬浮窗权限后本服务直接启动告警页 Activity（见 tryLaunchAlarmDirectly）
-//   ③ ①② 都被拦时，直接把告警页画在一个全屏悬浮窗上（见 showAlarmOverlay）
-// ①② 都要「启动一个 Activity」，因此必然经过 Android 10+ 的后台启动限制（BAL）；
-// 国产 ROM 还额外叠了「后台弹出界面」开关。③ 由本进程调 WindowManager.addView 完成，
-// 不涉及 Activity 启动，是唯一不受这些闸门管辖的一条。
+// 「确保被注意到」的可靠通道是**持续震动**：vibrate=true 的消息（key/job 开关或
+// `?vibrate=1`）在本服务内直接驱动马达循环震动，直到用户点击横幅 / 滑掉通知 / 30 秒超时。
+// 震动放在 Service 而不是 Activity，正是因为它不依赖任何界面是否被拉起 ——
+// 若绑在 Activity 生命周期上，恰好在最需要它的场景（界面没弹出来）直接失效。
+// 马达直调不受锁屏/亮屏、静音模式、勿扰策略影响。
 class PushService : Service() {
 
     private val client = OkHttpClient.Builder()
@@ -76,20 +61,6 @@ class PushService : Service() {
     private var stopReceiver: BroadcastReceiver? = null
     // 超时兜底：用户一直不处理时自动停，避免无限震动耗电 / 无法操作设备
     private val stopVibrateRunnable = Runnable { onVibrateTimeout() }
-    // 超时后要把横幅收回通知栏，所以得记住这条通知的内容
-    private var strongMsgId = 0L
-    private var strongTitle: String? = null
-    private var strongBody: String = ""
-
-    // ---------- 直拉告警页（第二条通道）的状态 ----------
-    // 让应用「具有可见窗口」的 1×1 透明悬浮窗，用完即撤（见 showLaunchOverlay）
-    private var launchOverlay: View? = null
-    // 直拉后的复核任务：判断这次到底有没有被系统放行
-    private var pendingVerify: Runnable? = null
-
-    // ---------- 悬浮窗告警页（第三条通道）的状态 ----------
-    private var alarmOverlay: View? = null
-    private var overlayHide: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -119,18 +90,8 @@ class PushService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 「滑掉通知」的 deleteIntent 走 startService 送达（见 buildMessageNotification 的说明）
         if (intent?.action == ACTION_STOP_VIBRATE) {
-            // 带 notif_id = 用户主动按了「停止震动」（通知上的按钮 / 告警页按钮）：
-            // 停震之外还要把横幅撤掉。持 USE_FULL_SCREEN_INTENT 时那条横幅是 persistent 的，
-            // 不会自己消失 —— 只停震不撤通知，用户回来会看到「横幅还挂着但已经没动静」。
-            // 不带 id = 滑掉通知（已经没了）或超时，无需 cancel。
-            val notifId = intent.getIntExtra(EXTRA_NOTIF_ID, 0)
-            LogHelper.append(this, "PushService onStartCommand: stop vibrate notifId=$notifId")
+            LogHelper.append(this, "PushService onStartCommand: stop vibrate")
             stopStrongVibrate()
-            if (notifId > 0) {
-                runCatching {
-                    (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(notifId)
-                }
-            }
             if (TokenStore(this).token.isNullOrBlank()) {
                 stopSelf()
                 return START_NOT_STICKY
@@ -159,9 +120,6 @@ class PushService : Service() {
         handler.removeCallbacksAndMessages(null)
         // 服务没了震动必须停：留着一个没人能取消的震动比不震更糟
         stopStrongVibrate()
-        // 悬浮窗也必须撤：服务被清掉后没人再来回收它，会一直盖在屏幕上
-        hideLaunchOverlay()
-        hideAlarmOverlay()
         stopReceiver?.let {
             try { unregisterReceiver(it) } catch (_: Exception) {}
         }
@@ -217,11 +175,7 @@ class PushService : Service() {
                         val title = keyName.ifEmpty { msgTitle.ifEmpty { "新通知" } }
                         showNotification(title, msgBody, msgId, vibrate)
                         // 先弹通知再起震动：渠道自带的那一次短震也在这条路径里
-                        if (vibrate) {
-                            startStrongVibrate(msgId, title, msgBody)
-                            // FSI 之外的第二条路：见 tryLaunchAlarmDirectly 的说明
-                            tryLaunchAlarmDirectly(msgId, messageNotifId(msgId), title, msgBody)
-                        }
+                        if (vibrate) startStrongVibrate(msgId)
                     }
                 } catch (_: Exception) {
                 }
@@ -280,7 +234,7 @@ class PushService : Service() {
         }
     }
 
-    private fun startStrongVibrate(id: Long, title: String, body: String) {
+    private fun startStrongVibrate(id: Long) {
         // 规则：用户已把本应用的通知关掉时不应震动 —— 否则就是「我把通知关了它还在震」，
         // 这种体验被投诉是必然的。
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -293,10 +247,6 @@ class PushService : Service() {
             LogHelper.append(this, "strong vibrate skipped: no vibrator")
             return
         }
-
-        strongMsgId = id
-        strongTitle = title
-        strongBody = body
 
         // 连续多条消息到达：只刷新超时，不叠加震动（同一条马达没法叠加）
         handler.removeCallbacks(stopVibrateRunnable)
@@ -316,301 +266,23 @@ class PushService : Service() {
         handler.postDelayed(stopVibrateRunnable, VIBRATE_TIMEOUT_MS)
     }
 
-    // 用户主动处理（点击通知 / 滑掉通知 / 告警页按钮）：只停震动，不动通知 ——
-    // 通知的处置权在用户手上（点击会自行消失、滑掉已经没了）
+    // 三条停止入口都汇到这里：点击强震横幅（经 KeysActivity 转成广播）、滑掉通知、30 秒超时。
+    // 只停震动，不碰通知 —— 通知的处置权在用户手上（点击会自行消失、滑掉已经没了）。
     fun stopStrongVibrate() {
         handler.removeCallbacks(stopVibrateRunnable)
-        // 悬浮窗告警页与震动同生共死：四条停止入口（通知/滑掉/超时/按钮）都经过这里，
-        // 挂在这里就等于「只要震动停了，盖在屏幕上的那一层一定也收掉」。
-        hideAlarmOverlay()
         if (!vibrating) return
         vibrating = false
         runCatching { vibrator?.cancel() }
         LogHelper.append(this, "strong vibrate stop")
     }
 
-    // 超时无人处理：停震 + 把横幅收回通知栏。
-    // 持 USE_FULL_SCREEN_INTENT 时解锁态那条横幅是 persistent，不会自己消失；
-    // 若只停震不管通知，用户回来会看到「横幅还挂着但已经没动静」，无从判断是否已处理。
+    // 超时无人处理：停止震动。横幅本身在几秒后会自动收回通知栏，无需额外处理。
     private fun onVibrateTimeout() {
+        LogHelper.append(this, "strong vibrate timeout after ${VIBRATE_TIMEOUT_MS / 1000}s")
         stopStrongVibrate()
-        retractHeadsUp()
-    }
-
-    private fun retractHeadsUp() {
-        val id = strongMsgId
-        val title = strongTitle
-        if (id <= 0 || title == null) return
-        try {
-            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            // 同一 id 重发一条**不带 fullScreenIntent** 的通知：横幅收回通知栏，内容仍可回看。
-            // （若真机上横幅未被收回，退化为 nm.cancel(messageNotifId(id)) 即可。）
-            nm.notify(
-                messageNotifId(id),
-                buildMessageNotification(title, strongBody, id, withFullScreen = false, onlyAlertOnce = true)
-            )
-            LogHelper.append(this, "strong vibrate timeout -> heads-up retracted id=$id")
-        } catch (e: Exception) {
-            LogHelper.append(this, "retract heads-up failed: ${e.message}")
-        }
     }
 
     // ---------- 通知 ----------
-
-    // 兜底通道：不依赖系统 FSI，自己把告警页拉到锁屏之上。
-    //
-    // 为什么需要它：FSI 是「请系统代为启动 Activity」，而系统在代为启动前还要过一道更外面的
-    // 闸门 —— Android 10+ 的**后台启动 Activity 限制**（BAL）。官方例外清单里，我们能自己
-    // 争取的有两条：
-    //   ① 应用已获得 SYSTEM_ALERT_WINDOW（悬浮窗）权限
-    //   ② 应用具有可见窗口
-    // 关键点：只满足 ① 往往不够。Android 15 起对 SAW 的收紧正是要求「持权限**且**存在可见的
-    // overlay 窗口」；部分 ROM 的实现也按「有可见窗口」判定。而后台服务本身**没有任何窗口** ——
-    // 这就是「权限全绿、依然只剩横幅」的最后一环。
-    // 所以这里两步都做：先挂一个 1×1 透明悬浮窗把 ② 补上，再启动告警页。
-    //
-    // 启动方式用 PendingIntent 而非裸 startActivity：Android 14 起系统不再默认给 PendingIntent
-    // 授予 BAL 特权，必须显式声明 MODE_BACKGROUND_ACTIVITY_START_ALLOWED —— 这是官方为
-    // 「后台启动 Activity」留的正规口子，比依赖隐式豁免更明确。
-    //
-    // 与 FSI 并行而非二选一：系统放行哪条就走哪条，两条都到也无害 —— AlarmActivity 是
-    // singleInstance，只会有一个实例，第二次进入走 onNewIntent 刷新内容。
-    private fun tryLaunchAlarmDirectly(id: Long, notifId: Int, title: String, body: String) {
-        // WindowManager.addView 必须在有 Looper 的线程上执行，而本方法由 WS 回调（OkHttp 线程）调用
-        handler.post { launchAlarmOnMain(id, notifId, title, body) }
-    }
-
-    private fun launchAlarmOnMain(id: Long, notifId: Int, title: String, body: String) {
-        if (!Settings.canDrawOverlays(this)) {
-            recordLaunchResult("未尝试：悬浮窗权限未开启，只剩系统全屏通知一条通道")
-            LogHelper.append(this, "direct launch skipped: no overlay permission id=$id")
-            return
-        }
-        // 场景闸门与 AOSP 的 FSI 判定保持一致：息屏、锁屏 → 全屏；
-        // 用户正在使用设备（亮屏且已解锁）→ 只用横幅，不抢占他手上正在做的事。
-        val screenOn = runCatching {
-            (getSystemService(POWER_SERVICE) as PowerManager).isInteractive
-        }.getOrDefault(true)
-        val locked = runCatching {
-            (getSystemService(KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
-        }.getOrDefault(false)
-        if (screenOn && !locked) {
-            recordLaunchResult("未尝试：屏幕亮且已解锁，按设计只给横幅（点横幅可进告警页）")
-            LogHelper.append(this, "direct launch skipped: interactive & unlocked id=$id")
-            return
-        }
-
-        val overlay = showLaunchOverlay(id)
-        val t0 = SystemClock.elapsedRealtime()
-        val sent = sendAlarmIntent(notifId, title, body)
-        LogHelper.append(
-            this,
-            "direct launch attempt id=$id (screenOn=$screenOn locked=$locked overlay=${overlay != null} sent=$sent)"
-        )
-
-        // 被 BAL 拦下时系统是**静默丢弃**（不抛异常、不回调），所以判断成败不能看返回值，
-        // 只能过一小会儿看 AlarmActivity 有没有真的 onCreate。不过复核结果还多一个用途：
-        // **失败时立刻切到第三条通道**（悬浮窗直绘），用户不必自己去换开关试。
-        pendingVerify?.let { handler.removeCallbacks(it) }
-        val verify = Runnable {
-            hideLaunchOverlay()
-            val ok = alarmStartedAt >= t0
-            if (ok) {
-                recordLaunchResult("成功：全屏告警页已弹出（Activity 通道）")
-                LogHelper.append(this, "direct launch verify id=$id -> alarm activity started")
-            } else {
-                // Activity 被系统拦下 → 换悬浮窗直绘。这条路不经过 Activity 启动，
-                // BAL 与 ROM 的「后台弹出界面」都管不到它。
-                LogHelper.append(
-                    this,
-                    "direct launch verify id=$id -> blocked (sent=$sent), fallback to alarm overlay"
-                )
-                showAlarmOverlay(title, body, notifId)
-            }
-        }
-        pendingVerify = verify
-        handler.postDelayed(verify, LAUNCH_VERIFY_MS)
-    }
-
-    // 1×1 全透明、不抢焦点、不接收触摸的悬浮窗。用户看不见它，唯一作用是让本应用
-    // 「具有可见窗口」—— 官方 BAL 例外清单里的独立一条，也是 Android 15 起 SAW 豁免
-    // 收紧后额外要求的条件。必须等告警页拉起之后再回收，否则判定当场失效。
-    @Suppress("DEPRECATION")
-    private fun showLaunchOverlay(id: Long): View? {
-        hideLaunchOverlay()
-        return try {
-            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-            val v = View(this)
-            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE
-            wm.addView(
-                v,
-                WindowManager.LayoutParams(
-                    1, 1, type,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                    PixelFormat.TRANSLUCENT
-                )
-            )
-            launchOverlay = v
-            v
-        } catch (e: Exception) {
-            // 挂不上不致命：FSI 通道仍在，只是少了一重豁免
-            LogHelper.append(this, "launch overlay failed: ${e.javaClass.simpleName}: ${e.message} id=$id")
-            null
-        }
-    }
-
-    private fun hideLaunchOverlay() {
-        val v = launchOverlay ?: return
-        launchOverlay = null
-        runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) }
-    }
-
-    // ---------- 第三条通道：悬浮窗直绘告警页 ----------
-    //
-    // 为什么需要它：①② 两条通道最终都要「启动一个 Activity」，而这必然经过 Android 10+ 的
-    // 后台启动限制（BAL）；国产 ROM 在此之上还叠了一道「后台弹出界面」开关（默认关闭，
-    // 位置在「应用信息」里而不是「特殊应用权限」）。一旦这道开关拦下，①② 会**同时**失效 ——
-    // 这正是「全屏通知已允许 + 悬浮窗已允许，息屏依然只出横幅」的原因。
-    //
-    // 悬浮窗是另一套机制：WindowManager.addView 由本进程直接完成，**不涉及 Activity 启动**，
-    // 因此不受 BAL 与「后台弹出界面」管辖，只需要悬浮窗权限。于是把告警页原样搬到一个
-    // TYPE_APPLICATION_OVERLAY 全屏窗口上即可 —— 布局复用 activity_alarm.xml，外观完全一致。
-    // FLAG_SHOW_WHEN_LOCKED 让它盖在锁屏之上，FLAG_TURN_SCREEN_ON 同时点亮屏幕。
-    private fun showAlarmOverlay(title: String, body: String, notifId: Int) {
-        handler.post {
-            if (!Settings.canDrawOverlays(this)) {
-                recordLaunchResult("失败：直拉被系统拦截，且未开启悬浮窗权限（只剩横幅）")
-                LogHelper.append(this, "alarm overlay skipped: no overlay permission")
-                return@post
-            }
-            hideAlarmOverlay()
-            try {
-                val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-                val v = LayoutInflater.from(this).inflate(R.layout.activity_alarm, null)
-                v.findViewById<TextView>(R.id.tvAlarmTitle).text = title
-                v.findViewById<TextView>(R.id.tvAlarmBody).text = body
-                v.findViewById<Button>(R.id.btnStop).apply {
-                    text = "关闭"
-                    // 全部显式写成 this@PushService：本块里 Button 也是一个隐式接收者，
-                    // 而 View 自带 getSystemService，不写限定符会静默落到 View 的实现上
-                    setOnClickListener {
-                        LogHelper.append(this@PushService, "alarm overlay: stop tapped")
-                        this@PushService.stopStrongVibrate()   // 内部会撤掉本悬浮窗
-                        if (notifId > 0) {
-                            runCatching {
-                                (this@PushService.getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
-                                    .cancel(notifId)
-                            }
-                        }
-                    }
-                }
-
-                val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else
-                    @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-
-                // 不加 FLAG_NOT_TOUCHABLE：按钮要能点。加 FLAG_NOT_FOCUSABLE 是为了不抢
-                // 输入焦点（按键仍归系统/锁屏），触摸事件照常投递到本窗口 —— 悬浮窗的标准做法。
-                @Suppress("DEPRECATION")
-                val flags = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-
-                val lp = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    type, flags, PixelFormat.TRANSLUCENT
-                ).apply { gravity = Gravity.TOP or Gravity.START }
-
-                wm.addView(v, lp)
-                alarmOverlay = v
-
-                // 与震动同一个时长：到点一起收，绝不出现「界面没了还在震」或反之
-                val hide = Runnable { hideAlarmOverlay() }
-                overlayHide = hide
-                handler.postDelayed(hide, VIBRATE_TIMEOUT_MS)
-
-                // FLAG_TURN_SCREEN_ON 对非 Activity 窗口的支持因 ROM 而异，补唤醒锁兜底
-                wakeScreenBriefly()
-
-                recordLaunchResult("成功：全屏告警页已弹出（悬浮窗通道）")
-                LogHelper.append(this, "alarm overlay shown notifId=$notifId")
-            } catch (e: Exception) {
-                recordLaunchResult("失败：悬浮窗告警页也未能显示（${e.javaClass.simpleName}）")
-                LogHelper.append(this, "alarm overlay failed: ${e.javaClass.simpleName}: ${e.message}")
-            }
-        }
-    }
-
-    private fun hideAlarmOverlay() {
-        overlayHide?.let { handler.removeCallbacks(it) }
-        overlayHide = null
-        val v = alarmOverlay ?: return
-        alarmOverlay = null
-        runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) }
-    }
-
-    // 点亮屏幕。FLAG_TURN_SCREEN_ON 是 Activity 窗口的正规做法，对 APPLICATION_OVERLAY
-    // 是否生效各家 ROM 不一，所以用带 ACQUIRE_CAUSES_WAKEUP 的唤醒锁兜底。
-    // 限时 10 秒自动释放：这是「把屏幕叫醒」而不是「让屏幕常亮」，
-    // 常亮由窗口上的 FLAG_KEEP_SCREEN_ON 负责（页面一收就跟着失效，不会漏电）。
-    private fun wakeScreenBriefly() {
-        runCatching {
-            @Suppress("DEPRECATION")
-            (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                "notifyhub:alarm"
-            ).acquire(10_000L)
-        }
-    }
-
-    // 返回值只表示「调用有没有抛异常」，**不代表 Activity 真的起来了** ——
-    // 被 BAL 拦截时系统静默丢弃，既不抛异常也不回调，只能靠 launchAlarmOnMain 里的复核判断。
-    private fun sendAlarmIntent(notifId: Int, title: String, body: String): Boolean {
-        val i = Intent(this, AlarmActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            .putExtra(AlarmActivity.EXTRA_TITLE, title)
-            .putExtra(AlarmActivity.EXTRA_BODY, body)
-            .putExtra(AlarmActivity.EXTRA_NOTIF_ID, notifId)
-        return try {
-            if (Build.VERSION.SDK_INT >= 34) {
-                // Android 14 起 PendingIntent 不再默认携带 BAL 特权，须显式 opt-in
-                val options = ActivityOptions.makeBasic()
-                    .setPendingIntentBackgroundActivityStartMode(
-                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-                    )
-                    .toBundle()
-                PendingIntent.getActivity(
-                    this, RC_ALARM_DIRECT, i,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                    options
-                ).send()
-            } else {
-                startActivity(i)
-            }
-            true
-        } catch (e: Exception) {
-            LogHelper.append(this, "send alarm intent failed: ${e.javaClass.simpleName}: ${e.message}")
-            false
-        }
-    }
-
-    private fun recordLaunchResult(result: String) {
-        runCatching {
-            getSharedPreferences(PREFS_STATE, MODE_PRIVATE).edit()
-                .putString(KEY_LAST_LAUNCH, result)
-                .putLong(KEY_LAST_LAUNCH_TS, System.currentTimeMillis())
-                .apply()
-        }
-    }
 
     private fun ensureChannel(): NotificationManager {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -661,10 +333,9 @@ class PushService : Service() {
 
     private fun showNotification(title: String, body: String, id: Long, vibrate: Boolean) {
         val nm = ensureChannel()
-        if (vibrate) logFsiFacts()
         // 通知 id 使用独立高位段，绝不与前台服务通知 id（1001）冲突：
         // 一旦消息 id 撞上 FGS 通知 id，该通知会被系统按前台服务通知对待（一键清除无法移除）
-        nm.notify(messageNotifId(id), buildMessageNotification(title, body, id, withFullScreen = vibrate))
+        nm.notify(messageNotifId(id), buildMessageNotification(title, body, id, vibrate))
         // 已触达回调：通知成功弹出到系统通知栏后，上报 Worker 修正该消息的触达状态
         if (id > 0) {
             CoroutineScope(Dispatchers.IO).launch {
@@ -673,61 +344,25 @@ class PushService : Service() {
         }
     }
 
-    // 锁屏全屏页（FSI）能否弹出，卡在几个**都在用户手上、App 只能读不能改**的外部开关上：
-    //   ① USE_FULL_SCREEN_INTENT 权限（Android 14+）
-    //   ② 推送渠道重要性（官方要求 ≥ IMPORTANCE_HIGH，且渠道一旦被调低就再也改不回来）
-    //   ③ 通知总开关
-    //   ④ SYSTEM_ALERT_WINDOW（悬浮窗）—— 不满足时 FSI 仍可能被 BAL/ROM 拦下，
-    //      满足时服务可以自己把告警页拉起来（tryLaunchAlarmDirectly）
-    // 出问题时现场只在日志里，所以每条强震消息都把这五项快照打出来。
-    // 判定方法：日志里若「strong vibrate start」之后既没有「AlarmActivity onCreate」也没有
-    // 「direct launch alarm activity」，说明这一次被系统降级成了横幅。
-    private fun logFsiFacts() {
-        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        val screenOn = runCatching {
-            (getSystemService(POWER_SERVICE) as PowerManager).isInteractive
-        }.getOrDefault(true)
-        LogHelper.append(
-            this,
-            "fsi facts: sdk=${Build.VERSION.SDK_INT} fsiPerm=${canUseFullScreenIntent(this)} " +
-                "channelImportance=${pushChannelImportance(this)} notifEnabled=${nm.areNotificationsEnabled()} " +
-                "overlayPerm=${canDrawOverlays(this)} screenOn=$screenOn"
-        )
-    }
-
-    // withFullScreen=true 时挂 fullScreenIntent → 锁屏/灭屏拉起 AlarmActivity；
-    // 亮屏解锁态、或 Android 13+ 判定「用户正在使用设备」时，系统一律降级为横幅，Activity 不会启动
-    // —— 这也是震动必须留在服务层的原因（见类头注释）。
+    // 视觉提醒统一是一条横幅：标题 + 正文（BigTextStyle 展开全文）。
+    // vibrate=true 时额外挂 deleteIntent —— 滑掉通知即停止震动，这是强震消息专属的快捷出口；
+    // 普通消息不挂，否则滑掉一条普通通知会误停另一条强震消息正在进行的震动。
     private fun buildMessageNotification(
         title: String,
         body: String,
         id: Long,
-        withFullScreen: Boolean,
-        onlyAlertOnce: Boolean = false,
+        vibrate: Boolean,
     ): Notification {
         val rc = messageNotifId(id)
 
-        // 点击目标分两路，语义完全不同：
-        //   强力震动 → 告警页：用户此刻最需要的是「让它停下来」，先把出口摆在面前
-        //   普通消息 → 主界面：无事发生，直接看列表
-        // 用不同 requestCode：PendingIntent 按 (requestCode + Intent 等价性) 匹配，
-        // contentIntent 与 fullScreenIntent 若共用同一个 rc，同一条通知里会互相更新 extras，
-        // 最后表现为「点横幅进错页」这类极难定位的问题。
-        val tapIntent = if (withFullScreen) {
-            Intent(this, AlarmActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra(AlarmActivity.EXTRA_TITLE, title)
-                .putExtra(AlarmActivity.EXTRA_BODY, body)
-                .putExtra(AlarmActivity.EXTRA_NOTIF_ID, rc)
-                .putExtra(AlarmActivity.EXTRA_FROM_TAP, true)  // 点横幅 = 已经看到了，进页即停震
-        } else {
-            // 普通通知刻意不带停震标记：否则点击它会误停「另一条强震消息」正在进行的震动
-            Intent(this, KeysActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
+        // 点击统一进主界面：强震消息额外带停震标记（点开 = 已经看到了），
+        // 由 KeysActivity 转成停止广播送回本服务（见 KeysActivity.handleStopVibrate）。
+        // 普通消息不带该标记 —— 否则点击它会误停另一条强震消息正在进行的震动。
         val contentPi = PendingIntent.getActivity(
             this, rc,
-            tapIntent,
+            Intent(this, KeysActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_STOP_VIBRATE, vibrate),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -739,10 +374,7 @@ class PushService : Service() {
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentIntent(contentPi)
-            // ALARM 而不是 MESSAGE：官方把 FSI 的适用场景限定为「来电 / 闹钟」，
-            // 归到闹钟类能让系统与各家 ROM 在锁屏展示、FSI 判定上给出更宽的通道；
-            // 语义上也贴切 —— 强力震动提醒本质就是用户自己设的闹钟。
-            .setCategory(if (withFullScreen) Notification.CATEGORY_ALARM else Notification.CATEGORY_MESSAGE)
+            .setCategory(Notification.CATEGORY_MESSAGE)
             // 锁屏显示完整内容：默认 PRIVATE 在部分 ROM 上会被抹成「内容已隐藏」，
             // 而这条通知存在的意义就是让用户不用解锁也看得清是什么事
             .setVisibility(Notification.VISIBILITY_PUBLIC)
@@ -750,29 +382,11 @@ class PushService : Service() {
             // 会直接破坏「滑掉通知即停止震动」这条路径。
             .setOngoing(false)
             .setAutoCancel(true)
-            .setOnlyAlertOnce(onlyAlertOnce)
 
-        if (withFullScreen) {
-            val fsPi = PendingIntent.getActivity(
-                this, rc + FS_REQUEST_OFFSET,
-                Intent(this, AlarmActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    .putExtra(AlarmActivity.EXTRA_TITLE, title)
-                    .putExtra(AlarmActivity.EXTRA_BODY, body)
-                    .putExtra(AlarmActivity.EXTRA_NOTIF_ID, rc),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            b.setFullScreenIntent(fsPi, true)
-
-            // 不在通知上挂「停止震动」action 按钮：横幅本身空间有限，
-            // 按钮在部分 ROM 上会把标题正文挤成一行，反而看不清是什么事。
-            // 停止路径仍有三条：点横幅进告警页、滑掉通知、30 秒超时。
-
-            // 滑掉通知 = 停止震动。只给强震通知挂：否则滑掉一条普通通知会误停
-            // 另一条消息正在进行的震动。
-            // 这里刻意用 getService 而不是 getBroadcast：系统代为发出 PendingIntent 时，
-            // 「动态注册的接收器 + 导出标志」是否放行存在版本差异，走 startService 没有这层歧义，
-            // 由 onStartCommand 识别 ACTION_STOP_VIBRATE 处理。
+        if (vibrate) {
+            // 滑掉通知 = 停止震动。刻意用 getService 而不是 getBroadcast：系统代为发出
+            // PendingIntent 时，「动态注册的接收器 + 导出标志」是否放行存在版本差异，
+            // 走 startService 没有这层歧义，由 onStartCommand 识别 ACTION_STOP_VIBRATE 处理。
             // 不带 notif_id：通知已经被划掉了，再 cancel 一次没有意义。
             b.setDeleteIntent(
                 PendingIntent.getService(
@@ -788,19 +402,15 @@ class PushService : Service() {
     companion object {
         // v2：旧渠道 notify_hub_push 是「有声音」的，而渠道声音属性创建后不可修改，
         // 要做到无声只能换 id（旧渠道在 ensureChannel 里删除）
-        // 对设置页开放：渠道重要性是 FSI 的硬门槛，设置页要读它并引导用户
         const val PUSH_CHANNEL_ID = "notify_hub_push_v2"
         private const val LEGACY_PUSH_CHANNEL_ID = "notify_hub_push"
         const val FG_CHANNEL_ID = "notify_hub_foreground"
         const val FOREGROUND_ID = 1001
 
-        // 震动停止指令：点击通知 / 滑掉通知 / 告警页按钮 / 超时关闭 都汇到这一个入口
+        // 震动停止指令：点击强震横幅 / 滑掉通知 / 30 秒超时 都汇到这一个入口
         const val ACTION_STOP_VIBRATE = "com.example.notifyhub.STOP_VIBRATE"
-        // 随停止指令携带的通知 id：>0 表示「连横幅一起撤掉」（用户主动停止），
-        // 缺省表示只停震（滑掉通知 / 超时，通知本身已消失或另有收回逻辑）
-        const val EXTRA_NOTIF_ID = "notif_id"
-        // 旧版遗留：点击通知进 KeysActivity 时带的停震标记。现在强震通知的点击目标是告警页，
-        // 普通通知不再带它 —— 保留常量仅为兼容系统里可能残留的旧 PendingIntent。
+        // 随通知点击 Intent 携带（true = 这是一条强震消息）：KeysActivity 见到就发一次停止广播。
+        // 桌面图标 / 最近任务进入不带该 extra，因此不会误停。
         const val EXTRA_STOP_VIBRATE = "stop_vibrate"
 
         private val VIBRATE_PATTERN = longArrayOf(0L, 700L, 500L)  // 震 700ms → 停 500ms，循环
@@ -809,9 +419,8 @@ class PushService : Service() {
         private const val MESSAGE_ID_BASE = 1_000_000  // 消息通知 id 段起点，避开 FGS 通知 id
         private const val DEDUP_WINDOW_MS = 3000L  // 防重缓存窗口：3 秒内同 key 只弹一次
 
-        // 同一条通知下三种 PendingIntent 的 requestCode 分段：共用 rc 基址 + 各自偏移，
-        // 既保证互不覆盖，又保证同一条消息每次重建时能命中同一个 PendingIntent
-        private const val FS_REQUEST_OFFSET = 100_000
+        // 同一条通知里 contentIntent 与 deleteIntent 的 requestCode 分段：
+        // 共用 rc 基址 + 偏移，既保证互不覆盖，又保证同一条消息每次重建时命中同一个 PendingIntent
         private const val DELETE_REQUEST_OFFSET = 300_000
 
         // 服务端为每条消息生成唯一 dedup_key（srv-<uuid>），重推消息由本缓存判重；
@@ -819,48 +428,14 @@ class PushService : Service() {
         fun messageNotifId(id: Long): Int =
             (MESSAGE_ID_BASE + (id % MESSAGE_ID_BASE)).toInt().coerceAtLeast(1)
 
-        // 全屏通知权限检测（Android 14+）：权限丢失后连锁屏都只剩 60 秒横幅，
-        // 所以设置页要能把用户引导到系统开关。
-        fun canUseFullScreenIntent(ctx: Context): Boolean =
-            if (Build.VERSION.SDK_INT < 34) true
-            else runCatching {
-                (ctx.getSystemService(NOTIFICATION_SERVICE) as NotificationManager).canUseFullScreenIntent()
-            }.getOrDefault(true)
-
-        // 悬浮窗权限（显示在其他应用上层）：后台启动 Activity 的硬豁免，设置页据此引导用户
-        fun canDrawOverlays(ctx: Context): Boolean =
-            runCatching { Settings.canDrawOverlays(ctx) }.getOrDefault(false)
-
-        // 推送渠道当前重要性。官方硬性要求：渠道低于 IMPORTANCE_HIGH 时系统**不会**启动 FSI，
-        // 而渠道重要性一旦被用户手动调低，App 就再也改不回来（只能引导用户去系统设置）。
-        // 返回 IMPORTANCE_NONE 表示渠道被关闭，-1 表示渠道还没创建（从未收到过推送）。
+        // 推送渠道当前重要性。渠道被关闭（IMPORTANCE_NONE）或低于「高」时，横幅与震动会退化，
+        // 而渠道一旦被用户手动调低，App 就再也改不回来（只能引导用户去系统设置）。
+        // 返回 -1 表示渠道还没创建（从未收到过推送）。
         fun pushChannelImportance(ctx: Context): Int =
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) NotificationManager.IMPORTANCE_HIGH
             else runCatching {
                 (ctx.getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                     .getNotificationChannel(PUSH_CHANNEL_ID)?.importance ?: -1
             }.getOrDefault(-1)
-
-        // ---- 直拉告警页（第二条通道）----
-        private const val RC_ALARM_DIRECT = 900_001
-        // 启动后等待 Activity onCreate 的复核窗口：太短会误判失败，太长会把悬浮窗挂得过久
-        private const val LAUNCH_VERIFY_MS = 2500L
-
-        // AlarmActivity.onCreate 时写入（elapsedRealtime，单调时钟，不受系统时间调整影响）。
-        // 直拉是否真被系统放行，就看它有没有在这次尝试之后更新 —— 被 BAL 拦截时
-        // startActivity 是静默丢弃的，没有任何其他信号可用。
-        @Volatile
-        var alarmStartedAt = 0L
-
-        // 上一次强力提醒的投递结论。设置页直接读这一项，用户不必去翻日志文件。
-        const val PREFS_STATE = "notify_hub_state"
-        const val KEY_LAST_LAUNCH = "last_launch_result"
-        const val KEY_LAST_LAUNCH_TS = "last_launch_ts"
-
-        fun lastLaunchResult(ctx: Context): Pair<String, Long>? {
-            val p = ctx.getSharedPreferences(PREFS_STATE, Context.MODE_PRIVATE)
-            val s = p.getString(KEY_LAST_LAUNCH, null) ?: return null
-            return s to p.getLong(KEY_LAST_LAUNCH_TS, 0L)
-        }
     }
 }
