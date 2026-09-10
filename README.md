@@ -33,7 +33,7 @@ notify-hub/
 ├── worker/      # Cloudflare Worker 后端 + D1 schema
 │   ├── src/     # index.js(路由) auth.js keys.js notifications.js webhook.js utils.js
 │   │            # jobs.js(定时任务 CRUD+执行) schedule.js(预设串解析) deliver.js(投递公共函数) push.js(DO)
-│   ├── migrations/0001_init.sql  0002_jobs.sql
+│   ├── migrations/0001_init.sql  0002_schema_sync.sql  0003_jobs.sql
 │   └── wrangler.toml
 ├── pages/       # Cloudflare Pages 静态控制台（仅配置，无构建）
 │   ├── index.html  styles.css  src/{config,api,app}.js
@@ -66,20 +66,31 @@ wrangler secret put JWT_SECRET
 ```
 
 ### 4. 初始化表
+
+> ⚠️ **wrangler v4 的 `d1 execute` 默认只操作本地库**，对线上库必须显式加 `--remote`。不加的话命令会"成功"但线上表根本没建，之后应用全部 500。
+
 ```bash
-wrangler d1 execute notify-hub --file=./migrations/0001_init.sql
-# 定时任务表 + 补齐 0001 之后新增的字段（首次部署或升级必跑，重复执行会报 duplicate column，属预期）
-wrangler d1 execute notify-hub --file=./migrations/0002_jobs.sql
-# 本地调试：加 --local
+# 分三个文件，按顺序执行（也可一条 npm run migrate:all 全跑）
+npm run migrate        # 0001：基础三张表（users / keys / notifications）
+npm run migrate:sync   # 0002：补齐 0001 之后手工 ALTER 出来的字段（不幂等，列已存在会报 duplicate column）
+npm run migrate:jobs   # 0003：定时任务表 jobs + 扫描索引（幂等，可重复执行）
 ```
+
+说明：
+
+- `0002_schema_sync.sql` 不幂等 —— SQLite 的 `ALTER TABLE ADD COLUMN` 没有 `IF NOT EXISTS`，且 `wrangler --file` 是**整批原子执行，一条失败全部回滚**。所以它和建表语句必须拆成两个文件，否则在已有库上会连带把建表也回滚掉。
+- 已经手工 ALTER 过的线上库**不需要**跑 `migrate:sync`，只跑 `migrate:jobs` 即可。
+- 本地调试把 `:remote` 换成 `--local`（如 `npm run migrate:jobs:local`）。
 
 ### 5. 部署
 ```bash
-wrangler deploy
+npm run deploy
 # 记下你的 Worker 地址，例如 https://notify-hub-worker.<sub>.workers.dev
 ```
 
-本地调试：`wrangler dev`（会自动用本地 D1，需先 `migrate:local`）。
+`wrangler.toml` 里的 `[triggers] crons = ["* * * * *"]` 会随部署一起注册，输出中会显示 `schedule: * * * * *`。
+
+本地调试：`wrangler dev`（会自动用本地 D1，需先跑 `:local` 版迁移）。
 
 ---
 

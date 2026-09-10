@@ -9,10 +9,13 @@
     "deploy": "wrangler deploy",
     "deploy:pages": "wrangler pages deploy ../pages --project-name notify-hub-pages",
     "test": "node test/schedule.test.js && node test/jobs.smoke.js",
-    "migrate": "wrangler d1 execute notify-hub --file=./migrations/0001_init.sql",
+    "migrate": "wrangler d1 execute notify-hub --remote --file=./migrations/0001_init.sql",
     "migrate:local": "wrangler d1 execute notify-hub --local --file=./migrations/0001_init.sql",
-    "migrate:0002": "wrangler d1 execute notify-hub --file=./migrations/0002_jobs.sql",
-    "migrate:0002:local": "wrangler d1 execute notify-hub --local --file=./migrations/0002_jobs.sql"
+    "migrate:sync": "wrangler d1 execute notify-hub --remote --file=./migrations/0002_schema_sync.sql",
+    "migrate:sync:local": "wrangler d1 execute notify-hub --local --file=./migrations/0002_schema_sync.sql",
+    "migrate:jobs": "wrangler d1 execute notify-hub --remote --file=./migrations/0003_jobs.sql",
+    "migrate:jobs:local": "wrangler d1 execute notify-hub --local --file=./migrations/0003_jobs.sql",
+    "migrate:all": "npm run migrate && npm run migrate:sync && npm run migrate:jobs"
   },
   "devDependencies": {
     "wrangler": "^3.78.0"

@@ -8,16 +8,10 @@ import { parseOffset, nextRunAt } from '../src/schedule.js';
 
 const db = new DatabaseSync(':memory:');
 db.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
-// 0002 对已存在的库是 ALTER，这里直接按 0002 的结构补齐（模拟线上库已手工 ALTER 的状态）
-db.exec(`
-  ALTER TABLE keys ADD COLUMN mode TEXT NOT NULL DEFAULT 'default';
-  ALTER TABLE keys ADD COLUMN template TEXT;
-  ALTER TABLE notifications ADD COLUMN delivered_at INTEGER;
-  ALTER TABLE notifications ADD COLUMN dedup_key TEXT;
-  CREATE INDEX IF NOT EXISTS idx_notif_dedup ON notifications(user_id, dedup_key, created_at);
-`);
-db.exec(readFileSync(new URL('../migrations/0002_jobs.sql', import.meta.url), 'utf8')
-  .split('\n').filter((l) => !l.trim().startsWith('ALTER TABLE')).join('\n'));
+// 按真实部署顺序跑迁移：0002 补列（内存库是全新的，ALTER 可直接执行）+ 0003 建 jobs 表。
+// 注意线上已有库不能跑 0002（列已存在会整批回滚），只跑幂等的 0003。
+db.exec(readFileSync(new URL('../migrations/0002_schema_sync.sql', import.meta.url), 'utf8'));
+db.exec(readFileSync(new URL('../migrations/0003_jobs.sql', import.meta.url), 'utf8'));
 
 // ---- 极简 D1 适配层 ----
 const stmt = (sql) => {
