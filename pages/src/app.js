@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
 import { API_BASE } from './config.js?v=20260911c';
-import { api, setToken, isLoggedIn } from './api.js?v=20260911g';
+import { api, setToken, isLoggedIn } from './api.js?v=20260911h';
 
 
 const $ = (sel) => document.querySelector(sel);
@@ -121,7 +121,7 @@ async function renderQQBot() {
   view.innerHTML = `
     <div class="card">
       <h2>机器人凭证</h2>
-      <p class="hint">在 <a href="https://q.qq.com" target="_blank" rel="noopener">QQ 开放平台</a>（或龙虾专用入口）创建机器人后，把 AppID / AppSecret 填在这里，<b>保存即生效，无需重新部署</b>。AppSecret 只在开放平台显示一次，请先复制好。</p>
+      <p class="hint">还没有机器人？先去 <a href="https://q.qq.com/qqbot/dashboard/" target="_blank" rel="noopener">QQ 机器人管理端</a> 创建：<b>① 扫码登录 → ② 创建机器人</b>（个人身份证认证即可，龙虾私人机器人也走这里）→ <b>③ 开发设置里拿 AppID / AppSecret</b>（Secret 只显示一次，先复制好）→ ④ 回本页填写。也可以直接打开 <a href="https://q.qq.com/qqbot/dashboard/" target="_blank" rel="noopener">q.qq.com/qqbot/dashboard</a>。</p>
       <form id="qq-form">
         <label>AppID<input name="app_id" value="${escapeHtml(c.app_id || '')}" placeholder="机器人 AppID" autocomplete="off" /></label>
         <label>AppSecret<input type="password" name="app_secret" value="" placeholder="${c.has_secret ? `已配置（${escapeHtml(c.secret_masked)}），留空保持不变` : '尚未配置'}" autocomplete="new-password" /></label>
