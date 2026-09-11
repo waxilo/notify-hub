@@ -1,10 +1,10 @@
 # Notify Hub
 
-一个「通知消息」中转站：提供一个**全局的、GET/POST 通用的 webhook 接口**，把任意来源的消息推送到你的 **QQ 群**（经 QQ 官方机器人，合规、无封号风险、无网关容器）。
+一个「通知消息」中转站：提供一个**全局的、GET/POST 通用的 webhook 接口**，把任意来源的消息推送到你的 **QQ 群或 QQ 私聊**（经 QQ 官方机器人，合规、无封号风险、无网关容器）。
 
 - **Web 控制台（Cloudflare Pages）**：全部配置 —— 注册/登录、Webhook Key 管理、定时任务、接入文档、账号。
 - **后端（Cloudflare Worker + D1）**：账号体系（JWT）、Key 路由、通用 webhook、定时任务（Cron 每分钟扫描）、通知存储、QQ 官方机器人触达。
-- **触达通道**：QQ 群消息（官方 OpenAPI）。消息一律先入库再推送 —— 推送失败不丢消息，历史里可见「未送达」。
+- **触达通道**：QQ 群消息 / QQ 单聊消息（官方 OpenAPI，目标由 `QQ_TARGET` 选择）。消息一律先入库再推送 —— 推送失败不丢消息，历史里可见「未送达」。
 
 > 线上：Worker `https://notify-hub-worker.sloan.dpdns.org` · Pages `https://notify-hub-pages.pages.dev`
 
@@ -14,18 +14,18 @@
 
 ```
   任意来源 (脚本/CI/监控)          QQ 官方机器人
-  curl / 程序 / 定时器 ──▶  GET/POST /hook/:key ──┐   ┌────────────────────────┐
-                            Cloudflare Worker     ├──▶│ api.sgroup.qq.com      │
-                            - 校验 key → 定位用户  │   │ /v2/groups/{openid}/…  │
-                            - 写入 notifications  │   └───────────┬────────────┘
-                            - QQ 群推送           │               ▼
-  定时任务: Cron * * * * * ─▶ runDueJobs ──────────┘        QQ 群（成员可见）
-  QQ 平台事件回调 ──────────▶ POST /api/qq/callback
-                              （Ed25519 验签，自动捕获群 openid）
+  curl / 程序 / 定时器 ──▶  GET/POST /hook/:key ──┐   ┌────────────────────────────┐
+                            Cloudflare Worker     ├──▶│ api.sgroup.qq.com          │
+                            - 校验 key → 定位用户  │   │ /v2/groups/{openid}/…  群  │
+                            - 写入 notifications  │   │ /v2/users/{openid}/…  私聊 │
+                            - QQ 推送(QQ_TARGET)  │   └───────────┬────────────────┘
+  定时任务: Cron * * * * * ─▶ runDueJobs ──────────┘               ▼
+  QQ 平台事件回调 ──────────▶ POST /api/qq/callback        QQ 群 / QQ 私聊
+                              （Ed25519 验签，自动捕获群/用户 openid）
 ```
 
 - **配置与执行分离**：定时任务存 D1，Worker Cron 每分钟扫描到期行（命中 `idx_jobs_due`，乐观锁防重），端侧零定时器。
-- **唯一触达通道 = QQ 官方机器人**：`deliver()` 入库后调官方 OpenAPI 发群消息；成功写 `delivered_at`，失败仅记日志。
+- **唯一触达通道 = QQ 官方机器人**：`deliver()` 入库后按 `QQ_TARGET` 调官方 OpenAPI（群/私聊/都发）；至少一个目标送达即写 `delivered_at`，失败仅记日志。
 - **无 App / 无 WebSocket / 无 Durable Object**：App 推送链路已整体移除。
 
 ## QQ 机器人接入（一次性，约 10 分钟）
@@ -42,12 +42,16 @@
    https://notify-hub-worker.sloan.dpdns.org/api/qq/callback
    ```
    平台做 URL 验证时，本服务会按官方要求回显 AppSecret；之后所有事件都会带 Ed25519 签名（密钥 seed = AppSecret），Worker 侧验签后才处理。
-4. **绑定 QQ 群**：把机器人拉进你的 QQ 群，在群里 **@机器人 随便说句话**。`GROUP_AT_MESSAGE_CREATE` 事件里的 `group_openid` 会被自动存入 D1 `settings` 表 —— 绑定完成，之后所有通知都发到这个群。
-   - 换群：在新群里再 @一次 即自动切换。
-   - 多群/固定目标（可选）：`npx wrangler secret put QQ_GROUP_OPENID` 显式指定，优先于自动捕获。
-5. **验证**：浏览器访问 `https://…/hook/<KEY>?message=hello`，QQ 群里应收到「key 名称 + hello」。
+4. **绑定触达目标**（两种可任选或都做，openid 自动捕获存 D1 `settings` 表）：
+   - **绑定 QQ 群**：把机器人拉进你的 QQ 群，在群里 **@机器人 随便说句话** → `GROUP_AT_MESSAGE_CREATE` 自动捕获 `group_openid`。换群：在新群里再 @一次 即自动切换。
+   - **绑定 QQ 私聊（私人机器人）**：在 QQ 里搜索/添加机器人为好友（沙箱成员扫码即可），然后 **私聊机器人发一句话** → `C2C_MESSAGE_CREATE` 自动捕获 `user_openid`。
+   - 多群/固定目标（可选）：`npx wrangler secret put QQ_GROUP_OPENID` / `QQ_USER_OPENID` 显式指定，优先于自动捕获。
+5. **选择触达目标**（`worker/wrangler.toml` 的 `[vars]`）：`QQ_TARGET = "group"`（默认，只发群）/ `"c2c"`（只发私聊）/ `"both"`（都发）。改完 `npx wrangler deploy` 生效。
+6. **验证**：浏览器访问 `https://…/hook/<KEY>?message=hello`，QQ 群/私聊应收到「key 名称 + hello」。
 
-> 频控（官方规则）：单群 1000 条/天、Bot 维度 30~60 条/分钟 —— 自用通知场景绰绰有余。
+> 龙虾（OpenClaw）用户注意：`q.qq.com/qqbot/openclaw` 专用入口创建的「私人机器人」就是标准 QQ 机器人（同一套 AppID/AppSecret/OpenAPI），notify-hub 直接用它的凭证接入即可 —— **不需要部署 OpenClaw，也不需要任何网关容器**。私人机器人官方建议私聊为主，正适合本场景。
+>
+> 频控（官方规则）：单群/单好友各 1000 条/天、Bot 维度 30~60 条/分钟 —— 自用通知场景绰绰有余。私聊主动消息的前提是接收方未关闭「允许主动发送」开关（默认开启）。
 
 ## 部署
 
@@ -107,8 +111,8 @@ notify-hub/
 │   │   ├── jobs.js        # 定时任务 CRUD + Cron 扫描执行
 │   │   ├── schedule.js    # 预设串解析 / next_run_at 推进（整分钟粒度）
 │   │   ├── holiday.js     # 节假日查询（按天缓存）
-│   │   ├── qq.js          # QQ 官方机器人：token 缓存 / 群消息 / 回调验签
-│   │   ├── deliver.js     # 投递公共函数：入库 + QQ 推送（失败隔离）
+│   │   ├── qq.js          # QQ 官方机器人：token 缓存 / 群消息 / 私聊消息 / 回调验签 + openid 捕获
+│   │   ├── deliver.js     # 投递公共函数：入库 + QQ 推送（QQ_TARGET 扇出，失败隔离）
 │   │   ├── notifications.js
 │   │   └── utils.js
 │   ├── migrations/        # 0001~0010（0010: settings 表，幂等）
