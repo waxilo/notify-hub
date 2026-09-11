@@ -130,9 +130,8 @@ export function nextRunAt(schedule, offsetMin, nowMs, prevMs) {
 export function describeSchedule(s, tz) {
   const p = parseSchedule(s);
   if (!p) return s || '—';
-  const at = tz ? `（${tz}）` : '';
   if (p.kind === 'interval') return p.unit === 'm' ? `每 ${p.n} 分钟` : `每 ${p.n} 小时`;
-  if (p.kind === 'daily') return `每天 ${pad2(p.h)}:${pad2(p.mi)}${at}`;
-  if (p.kind === 'weekly') return `每${DOW_CN[p.dow]} ${pad2(p.h)}:${pad2(p.mi)}${at}`;
-  return `一次性 ${p.y}-${pad2(p.mo)}-${pad2(p.d)} ${pad2(p.h)}:${pad2(p.mi)}${at}`;
+  if (p.kind === 'daily') return `每天 ${pad2(p.h)}:${pad2(p.mi)}`;
+  if (p.kind === 'weekly') return `每${DOW_CN[p.dow]} ${pad2(p.h)}:${pad2(p.mi)}`;
+  return `一次性 ${p.y}-${pad2(p.mo)}-${pad2(p.d)} ${pad2(p.h)}:${pad2(p.mi)}`;
 }
