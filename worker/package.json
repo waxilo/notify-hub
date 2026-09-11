@@ -1,6 +1,6 @@
 {
   "name": "notify-hub-worker",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -25,7 +25,12 @@
     "migrate:rejected:local": "wrangler d1 execute notify-hub --local --file=./migrations/0007_notifications_rejected.sql",
     "migrate:vibrate": "wrangler d1 execute notify-hub --remote --file=./migrations/0008_strong_vibrate.sql",
     "migrate:vibrate:local": "wrangler d1 execute notify-hub --local --file=./migrations/0008_strong_vibrate.sql",
-    "migrate:all": "npm run migrate && npm run migrate:sync && npm run migrate:jobs && npm run migrate:detach && npm run migrate:notifjob && npm run migrate:notifidx && npm run migrate:rejected && npm run migrate:vibrate"
+    "migrate:settings": "wrangler d1 execute notify-hub --remote --file=./migrations/0010_settings.sql",
+    "migrate:settings:local": "wrangler d1 execute notify-hub --local --file=./migrations/0010_settings.sql",
+    "migrate:all": "npm run migrate && npm run migrate:sync && npm run migrate:jobs && npm run migrate:detach && npm run migrate:notifjob && npm run migrate:notifidx && npm run migrate:rejected && npm run migrate:vibrate && npm run migrate:settings"
+  },
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "wrangler": "^3.78.0"

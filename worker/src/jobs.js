@@ -90,7 +90,6 @@ async function fireJob(env, job, now) {
     payload: JSON.stringify({ source: 'job', job_id: job.id, scheduled_at: firedAt }),
     dedupKey: `job:${job.id}:${firedAt}`,
     dedup: true,
-    vibrate: !!job.strong_vibrate,
   });
 
   // 2) 再推进 job。顺序不能反：先推进再投递的话，投递失败这条触发就永久丢了。
@@ -160,15 +159,14 @@ export async function createJob(request, env, userId) {
   // title 列已废弃（标题一律取任务名称），保留列不写值。
   const skipHoliday = b.skip_holiday ? 1 : 0;
   const res = await env.DB.prepare(
-    `INSERT INTO jobs (user_id, key_id, name, schedule, tz, title, body, enabled, strong_vibrate, skip_holiday, next_run_at, created_at, updated_at)
-     VALUES (?,NULL,?,?,?,NULL,?,?,?,?,?,?,?)`
+    `INSERT INTO jobs (user_id, key_id, name, schedule, tz, title, body, enabled, skip_holiday, next_run_at, created_at, updated_at)
+     VALUES (?,NULL,?,?,?,NULL,?,?,?,?,?,?)`
   ).bind(
     userId,
     name,
     schedule, tz,
     String(b.body || '').slice(0, 8000),
     b.enabled === false ? 0 : 1,
-    b.strong_vibrate ? 1 : 0,
     skipHoliday,
     next, now, now,
   ).run();
@@ -191,8 +189,6 @@ export async function updateJob(request, env, userId, id) {
   if (!name) return json({ error: 'name is required' }, 400);
   const body = b.body !== undefined ? String(b.body).slice(0, 8000) : job.body;
   const enabled = b.enabled !== undefined ? (b.enabled ? 1 : 0) : job.enabled;
-  // 与 updateKey 同策略：字段不传就不改（旧版客户端不会带这个字段，不能把用户的开关抹掉）
-  const strongVibrate = b.strong_vibrate !== undefined ? (b.strong_vibrate ? 1 : 0) : job.strong_vibrate;
   const skipHoliday = b.skip_holiday !== undefined ? (b.skip_holiday ? 1 : 0) : job.skip_holiday;
 
   const now = Date.now();
@@ -202,9 +198,9 @@ export async function updateJob(request, env, userId, id) {
 
   // key_id 不参与更新（恒为 NULL）；title 列已废弃，不再写入
   await env.DB.prepare(
-    `UPDATE jobs SET name=?, schedule=?, tz=?, body=?, enabled=?, strong_vibrate=?, skip_holiday=?, next_run_at=?, updated_at=?
+    `UPDATE jobs SET name=?, schedule=?, tz=?, body=?, enabled=?, skip_holiday=?, next_run_at=?, updated_at=?
       WHERE id=? AND user_id=?`
-  ).bind(name, schedule, tz, body, enabled, strongVibrate, skipHoliday, next, now, id, userId).run();
+  ).bind(name, schedule, tz, body, enabled, skipHoliday, next, now, id, userId).run();
 
   return json({ ok: true, next_run_at: next, desc: describeSchedule(schedule, tz) });
 }

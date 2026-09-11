@@ -51,14 +51,6 @@ export async function markRead(request, env, userId, id) {
   return json({ ok: true });
 }
 
-// App 收到 WS 推送并成功弹出系统通知后回调，修正触达状态（只记录首次触达）
-export async function markDelivered(request, env, userId, id) {
-  const res = await env.DB.prepare(
-    'UPDATE notifications SET delivered_at=? WHERE id=? AND user_id=? AND delivered_at IS NULL'
-  ).bind(Date.now(), id, userId).run();
-  return json({ ok: true, updated: res.meta.changes > 0 });
-}
-
 export async function deleteNotification(request, env, userId, id) {
   await env.DB.prepare('DELETE FROM notifications WHERE id=? AND user_id=?').bind(id, userId).run();
   return json({ ok: true });
