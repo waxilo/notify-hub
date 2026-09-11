@@ -241,10 +241,14 @@ export async function handleCallback(request, env, ctx) {
       await setSetting(env, GROUP_OPENID_KEY, payload.d.group_openid);
     }
   }
-  if (payload.t === 'C2C_MESSAGE_CREATE' && payload.d && payload.d.user_openid) {
-    const prev = await getSetting(env, USER_OPENID_KEY);
-    if (prev !== payload.d.user_openid) {
-      await setSetting(env, USER_OPENID_KEY, payload.d.user_openid);
+  if (payload.t === 'C2C_MESSAGE_CREATE' && payload.d) {
+    // 实测事件里 openid 在 d.author.user_openid（d.user_openid 不存在，两种路径都兼容）
+    const oid = (payload.d.author && payload.d.author.user_openid) || payload.d.user_openid;
+    if (oid) {
+      const prev = await getSetting(env, USER_OPENID_KEY);
+      if (prev !== oid) {
+        await setSetting(env, USER_OPENID_KEY, oid);
+      }
     }
   }
   // 官方 op 12 = HTTP Callback ACK：告知平台已收到推送（对齐 AstrBot/官方协议）
