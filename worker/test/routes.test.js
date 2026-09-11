@@ -62,10 +62,14 @@ for (const [method, path, label] of ROUTES) {
 }
 
 console.log('\n---- 反向对照：不存在的路径必须仍是 404 ----');
-for (const path of ['/api/nope', '/api/keys/1/nope', '/api/users', '/api/app/latest', '/api/app/download', '/api/notifications/1/delivered']) {
+for (const path of ['/api/nope', '/api/keys/1/nope', '/api/users', '/api/app/latest', '/api/app/download']) {
   const r = await hitBody('GET', path);
   ck(`已删/未知路径 ${path} 返回 404`, isUnregistered(r), `status=${r.status} body=${r.body.slice(0, 60)}`);
 }
+// 已删除的 markDelivered 路由：POST 必须回到 404（GET 会被「通知详情」前缀路由接住，属正常行为）
+const delRoute = await hitBody('POST', '/api/notifications/1/delivered');
+ck('已删的 POST /notifications/:id/delivered 返回 404', isUnregistered(delRoute),
+  `status=${delRoute.status} body=${delRoute.body.slice(0, 60)}`);
 
 console.log('\n---- 清空接口必须拒绝无参数调用 ----');
 const noParam = await hitBody('DELETE', '/api/notifications');

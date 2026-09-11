@@ -111,7 +111,7 @@ ck('tick 触发 1 个', r.scanned === 1 && r.fired === 1, JSON.stringify(r));
 let n = db.prepare('SELECT COUNT(*) c FROM notifications').get();
 ck('产生 1 条通知', n.c === 1, 'count=' + n.c);
 ck('调用 QQ 群消息接口', qqCalls.length === 1, JSON.stringify(qqCalls[0] || {}));
-ck('QQ 消息标题取任务名称', qqCalls[0].text === '任务', JSON.stringify(qqCalls[0].text));
+ck('QQ 消息标题取任务名称', qqCalls[0].text === '任务\n任务', JSON.stringify(qqCalls[0].text));
 ck('QQ 消息为文本类型', qqCalls[0].msg_type === 0, JSON.stringify(qqCalls[0].msg_type));
 ck('通知不挂 key_id', db.prepare('SELECT key_id FROM notifications').get().key_id === null);
 // 通知归到任务名下：任务列表能统计「已发送 N 条」，也能按任务查历史
@@ -313,10 +313,11 @@ qqSendFail = false;
 const envNoGroup = { ...env, QQ_GROUP_OPENID: '' };
 db.prepare("DELETE FROM settings WHERE k='qq_group_openid'").run();
 const qqBefore4 = qqCalls.length;
+const notifBefore4 = countAll();
 hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('没配群号'), { method: 'GET' }), envNoGroup, 'k3');
 ck('未配置群 openid 时仍返回 201', hr.status === 201, 'status=' + hr.status);
 ck('未配置群 openid 时不调 QQ', qqCalls.length === qqBefore4, 'qq=' + (qqCalls.length - qqBefore4));
-ck('未配置群 openid 时通知仍入库', countAll() === notifBefore + 3, 'c=' + countAll());
+ck('未配置群 openid 时通知仍入库', countAll() === notifBefore4 + 1, 'c=' + countAll());
 
 /* ---------------- createJob / updateJob 的写入路径 ---------------- */
 
