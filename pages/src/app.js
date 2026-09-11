@@ -1,13 +1,10 @@
 // Web 控制台逻辑（仅配置）
-import { API_BASE } from './config.js?v=20260911a';
-import { api, setToken, isLoggedIn } from './api.js?v=20260911a';
+import { API_BASE } from './config.js?v=20260911c';
+import { api, setToken, isLoggedIn } from './api.js?v=20260911c';
 
 
 const $ = (sel) => document.querySelector(sel);
 const root = $('#app');
-// APK 下载走 Worker 代理：资产名带版本（notify-hub-v1.0.N-cN.apk），
-// 不能再按 GitHub 固定文件名直链；Worker 按 .apk 后缀动态查找，并回传正确的下载文件名
-const APK_URL = `${API_BASE}/api/app/download`;
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -47,9 +44,6 @@ function authView() {
         <button type="submit" class="btn primary block" id="auth-submit">登录</button>
         <p class="msg" id="auth-msg"></p>
       </form>
-      <div class="dl-noauth">
-        <a class="btn primary block" href="${APK_URL}">下载安卓 App（无需登录）</a>
-      </div>
     </div>
   </div>`;
   let mode = 'login';
@@ -81,7 +75,6 @@ async function mainView() {
       <button id="tab-keys" class="active">Key 管理</button>
       <button id="tab-jobs">定时任务</button>
       <button id="tab-docs">接入文档</button>
-      <button id="tab-app">App 下载</button>
       <button id="tab-acct">账号</button>
       <button id="logout" class="ghost">退出</button>
     </nav>
@@ -90,47 +83,21 @@ async function mainView() {
     <section id="view-keys"></section>
     <section id="view-jobs" hidden></section>
     <section id="view-docs" hidden></section>
-    <section id="view-app" hidden></section>
     <section id="view-acct" hidden></section>
   </main>
   <div id="modal-root"></div>`;
   $('#tab-keys').onclick = () => switchTab('tab-keys', 'view-keys');
   $('#tab-jobs').onclick = () => { switchTab('tab-jobs', 'view-jobs'); renderJobs(); };
   $('#tab-docs').onclick = () => { switchTab('tab-docs', 'view-docs'); renderDocs(); };
-  $('#tab-app').onclick = () => { switchTab('tab-app', 'view-app'); renderAppDownload(); };
   $('#tab-acct').onclick = () => { switchTab('tab-acct', 'view-acct'); renderAccount(); };
   $('#logout').onclick = () => { setToken(null); authView(); };
   renderKeys();
 }
 
 function switchTab(tabId, viewId) {
-  ['tab-keys', 'tab-jobs', 'tab-docs', 'tab-app', 'tab-acct'].forEach((t) => $('#' + t).classList.remove('active'));
+  ['tab-keys', 'tab-jobs', 'tab-docs', 'tab-acct'].forEach((t) => $('#' + t).classList.remove('active'));
   $('#' + tabId).classList.add('active');
-  ['view-keys', 'view-jobs', 'view-docs', 'view-app', 'view-acct'].forEach((v) => { $('#' + v).hidden = v !== viewId; });
-}
-
-function renderAppDownload() {
-  const view = $('#view-app');
-  view.innerHTML = `
-    <div class="card">
-      <h2>下载安卓 App</h2>
-      <p id="apk-meta" class="hint">正在获取最新版本…</p>
-      <p><a class="btn primary" id="apk-link" href="${APK_URL}">下载最新 APK</a></p>
-      <p class="hint">手机浏览器打开本页点击下载；安装时如提示"未知来源"，允许即可。</p>
-      <p class="hint">历史版本见 <a href="https://github.com/waxilo/notify-hub/releases" target="_blank" rel="noopener">GitHub Releases</a>。</p>
-    </div>`;
-  // 拉取版本信息（接口公开，无需登录）；失败时不影响下载按钮
-  fetch(`${API_BASE}/api/app/latest`)
-    .then((r) => (r.ok ? r.json() : null))
-    .then((d) => {
-      const meta = $('#apk-meta');
-      if (!meta || !d || !d.versionCode) { if (meta) meta.textContent = '版本信息暂不可用，可直接下载。'; return; }
-      const mb = d.apkSize ? `（${(d.apkSize / 1048576).toFixed(1)} MB）` : '';
-      meta.textContent = `最新版：v${d.versionName || d.versionCode}（code ${d.versionCode}）${mb}`;
-      const link = $('#apk-link');
-      if (link) link.textContent = `下载最新 APK v${d.versionName || d.versionCode}`;
-    })
-    .catch(() => { const meta = $('#apk-meta'); if (meta) meta.textContent = '版本信息暂不可用，可直接下载。'; });
+  ['view-keys', 'view-jobs', 'view-docs', 'view-acct'].forEach((v) => { $('#' + v).hidden = v !== viewId; });
 }
 
 /* ---------- 接入文档 ---------- */
@@ -185,7 +152,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
       <div class="doc-code"><code>${escapeHtml(samples[0])}</code><button class="btn mini doc-copy">复制</button></div>
       <p class="hint">或用 curl：</p>
       <div class="doc-code"><code>${escapeHtml(samples[1])}</code><button class="btn mini doc-copy">复制</button></div>
-      <p class="hint">App 在线时通知毫秒级弹出；离线时消息会入库，App 上线后由服务端自动重推（0.3 秒间隔，最多 5 次）。</p>
+      <p class="hint">通知经 QQ 官方机器人推送到绑定的 QQ 群；网关失败时消息仍入库（历史显示「未送达」），不会丢失。</p>
     </div>
 
     <div class="card doc-card">
@@ -201,7 +168,6 @@ requests.post('${API_BASE}/hook/<KEY>', json={
         <tbody>
           <tr><td><code>message</code></td><td>通知内容（最长 8000 字符）</td></tr>
           <tr><td><code>dedup_key</code></td><td>可选。显式防重 key：5 分钟窗口内相同 key 只推送一次（用于调用方超时重试场景）。不传则服务端自动生成唯一 key，消息不做内容去重</td></tr>
-          <tr><td><code>vibrate</code></td><td>可选。<code>1</code> = 强力震动（无声持续震动，直到点击/滑掉通知，最长 30 秒）；<code>0</code> = 普通提醒。<b>不传则用该 key 在「Key 管理 → 编辑」里配置的默认值</b></td></tr>
         </tbody>
       </table>
       <p class="hint"><b>不需要传 title</b>：通知标题固定为 key 的名称，任何模式下都不会被请求参数覆盖。</p>
@@ -218,7 +184,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
     <div class="card doc-card">
       <h2><span class="doc-num">4</span>响应与防重</h2>
       <div class="doc-code"><code>${escapeHtml(samples[6])}</code><button class="btn mini doc-copy">复制</button></div>
-      <p class="hint"><b>防重语义</b>：服务端默认每条消息互不重复（不做内容去重）。只有当调用方显式传了 <code>dedup_key</code> 时才做去重——适合「发送超时后重试」的场景，避免重试导致重复弹通知。每条消息都会携带唯一防重 key 下发给 App，用于识别服务端重推。</p>
+      <p class="hint"><b>防重语义</b>：服务端默认每条消息互不重复（不做内容去重）。只有当调用方显式传了 <code>dedup_key</code> 时才做去重——适合「发送超时后重试」的场景，避免重试导致重复弹通知。</p>
     </div>`;
 
   view.querySelectorAll('.doc-copy').forEach((btn, i) => {
@@ -304,7 +270,6 @@ async function loadList() {
           <span class="key-name">${escapeHtml(k.name)}</span>
           <span class="badge ${k.active ? 'on' : 'off'}">${k.active ? '启用中' : '已停用'}</span>
           <span class="badge mode">${k.mode === 'custom' ? '自定义' : '默认'}</span>
-          ${k.strong_vibrate ? '<span class="badge mode">强震</span>' : ''}
           <code class="key-url">${escapeHtml(k.keyFull || k.key)}</code>
           <button class="key-more" data-more="${k.id}" aria-label="操作菜单">⋯</button>
         </div>
@@ -408,8 +373,6 @@ function openKeyEdit(k) {
           <input name="template" value="${escapeHtml(k.template || '')}" placeholder="如：$&#123;name&#125; 的年龄是 $&#123;age&#125; 岁" />
         </div>
         <label class="check-row"><input type="checkbox" name="active" ${k.active ? 'checked' : ''}/> 启用此 key（停用后 webhook 调用将被拒绝，不推送消息）</label>
-        <label class="check-row"><input type="checkbox" name="strong_vibrate" ${k.strong_vibrate ? 'checked' : ''}/> 强力震动（无声，持续震动到点击/滑掉通知，最长 30 秒）</label>
-        <p class="hint xs">开启后，App 收到该 key 的消息会无声持续震动，直到点击或滑掉通知（最长 30 秒）；未开启则是普通横幅 + 单次震动。调用方也可用 <code>?vibrate=1</code> / <code>?vibrate=0</code> 按次覆盖。</p>
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="edit-cancel">取消</button>
           <button type="submit" class="btn primary">保存</button>
@@ -433,7 +396,6 @@ function openKeyEdit(k) {
         active: F.active.checked,
         mode: F.mode.value,
         template: F.mode.value === 'custom' ? F.template.value : '',
-        strong_vibrate: F.strong_vibrate.checked,
       });
       root_.innerHTML = '';
       loadList();
@@ -516,7 +478,6 @@ async function loadJobs() {
           <span class="key-name">${escapeHtml(j.name || '未命名任务')}</span>
           <span class="badge ${j.enabled ? 'on' : 'off'}">${j.enabled ? '启用中' : '已停用'}</span>
           <span class="badge mode">${escapeHtml(j.desc || j.schedule)}</span>
-          ${j.strong_vibrate ? '<span class="badge mode">强震</span>' : ''}
         </div>
         <div class="key-sub">
           <span class="hint">通知内容：${escapeHtml(j.body || '（与任务名称相同）')}</span>
@@ -578,7 +539,7 @@ function openJobEdit(job) {
       <form id="job-form">
         <label>任务名称</label>
         <input name="name" value="${escapeHtml((job && job.name) || '')}" placeholder="如：每日签到提醒" required />
-        <p class="hint xs" style="margin:6px 0 0">通知标题即任务名称，触发后直接推送到本账号的 App。</p>
+        <p class="hint xs" style="margin:6px 0 0">通知标题即任务名称，触发后推送到绑定的 QQ 群。</p>
 
         <label>重复方式</label>
         <select name="kind" id="job-kind">
@@ -616,9 +577,7 @@ function openJobEdit(job) {
         <label>通知内容</label>
         <input name="body" value="${escapeHtml((job && job.body) || '')}" placeholder="留空则与任务名称相同" />
 
-        <label class="check-row" style="margin-top:10px"><input type="checkbox" name="strong_vibrate" ${job && job.strong_vibrate ? 'checked' : ''}/> 强力震动（无声，持续震动到点击/滑掉通知，最长 30 秒）</label>
-        <p class="hint xs" style="margin:4px 0 0">未开启时是普通横幅 + 单次震动。</p>
-        <label class="check-row" style="margin-top:8px"><input type="checkbox" name="skip_holiday" ${job && job.skip_holiday ? 'checked' : ''}/> 跳过节假日（当天为非工作日时不触发，仅周期型任务生效）</label>
+        <label class="check-row" style="margin-top:10px"><input type="checkbox" name="skip_holiday" ${job && job.skip_holiday ? 'checked' : ''}/> 跳过节假日（当天为非工作日时不触发，仅周期型任务生效）</label>
 
         <details class="adv" ${needAdv ? 'open' : ''}>
           <summary>高级设置（启停）</summary>
@@ -720,7 +679,6 @@ function openJobEdit(job) {
       schedule,
       tz,
       enabled: F.enabled.checked,
-      strong_vibrate: F.strong_vibrate.checked,
       skip_holiday: F.skip_holiday.checked,
     };
     try {
@@ -780,7 +738,7 @@ async function openHistory({ title, subtitle, keyId, jobId, emptyText, onCleared
         </span>
       </div>
       <p class="hint xs" style="margin:0 0 8px">${escapeHtml(subtitle || '')}</p>
-      <p class="hint">状态说明：<b class="ok">已触达</b> = App 已弹出系统通知；<b class="warn">未触达</b> = App 离线尚未接收；<b class="rej">停用拒绝</b> = key 已停用，调用被拒绝且未推送。点击「${rawLabel}」可查看该条通知的完整原始数据。</p>
+      <p class="hint">状态说明：<b class="ok">已送达</b> = 已成功推送到 QQ 群；<b class="warn">未送达</b> = 推送失败（QQ 凭证未配置 / 网关异常），消息仍在，修复后不会自动重发；<b class="rej">停用拒绝</b> = key 已停用，调用被拒绝且未推送。点击「${rawLabel}」可查看该条通知的完整原始数据。</p>
       <div id="hist-body"><p class="hint">加载中…</p></div>
       <div class="modal-actions" id="hist-pager" style="justify-content:space-between;align-items:center;">
         <span class="hint" id="hist-total"></span>
@@ -817,14 +775,14 @@ async function openHistory({ title, subtitle, keyId, jobId, emptyText, onCleared
           <thead><tr><th>标题</th><th>内容</th><th>发送时间</th><th>状态</th><th>${rawLabel}</th></tr></thead>
           <tbody>${notifications.map((n, i) => {
             const empty = !n.body || !String(n.body).trim();
-            // 「停用拒绝」优先：这类记录服务端本就没推送，显示成「未触达」会让人以为是漏推了
+            // 「停用拒绝」优先：这类记录服务端本就没推送，显示成「未送达」会让人以为是漏推了
             const status = n.rejected
               ? '<span class="badge rejected">停用拒绝</span>'
               : (empty
                 ? '<span class="badge empty-msg">空消息</span>'
                 : (n.delivered_at
-                  ? `<b class="ok">已触达</b><br/><span class="hint xs">${new Date(n.delivered_at).toLocaleString()}</span>`
-                  : '<b class="warn">未触达</b>'));
+                  ? `<b class="ok">已送达</b><br/><span class="hint xs">${new Date(n.delivered_at).toLocaleString()}</span>`
+                  : '<b class="warn">未送达</b>'));
             return `
             <tr>
               <td>${escapeHtml(n.title)}</td>
