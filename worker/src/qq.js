@@ -193,7 +193,7 @@ function validationResponse(secret, plainToken, eventTs) {
 //   2) GROUP_AT_MESSAGE_CREATE：捕获 group_openid 存库（首次绑定 / 换群自动更新）
 //   3) C2C_MESSAGE_CREATE：捕获 user_openid 存库（私聊绑定 / 好友换号自动更新）
 //   其余事件：验签后忽略（当前只用它拿 openid）
-export async function handleCallback(request, env) {
+export async function handleCallback(request, env, ctx) {
   const cfg = await resolveBotConfig(env);
   if (!cfg.appId || !cfg.appSecret) {
     return json({ error: 'qq bot not configured (set in web console, or QQ_APP_ID / QQ_APP_SECRET via wrangler secret)' }, 500);
@@ -202,17 +202,18 @@ export async function handleCallback(request, env) {
   let payload;
   try { payload = JSON.parse(raw); } catch { return json({ error: 'bad json' }, 400); }
 
-  // 请求留痕（排查回调配置问题用；只保留最近一次）
-  try {
-    await setSetting(env, 'qq_last_callback', JSON.stringify({
+  // 请求留痕（排查回调配置问题用；只保留最近一次）。
+  // 平台要求验证响应在 3 秒内返回，留痕写入必须移出响应路径（waitUntil）
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil(setSetting(env, 'qq_last_callback', JSON.stringify({
       ts: new Date().toISOString(),
       ua: request.headers.get('User-Agent') || '',
       bot_appid: request.headers.get('X-Bot-Appid') || '',
       op: payload.op,
       d_keys: payload.d ? Object.keys(payload.d).join(',') : '',
       raw: raw.slice(0, 2000),
-    }));
-  } catch { /* 留痕失败不影响主流程 */ }
+    })).catch(() => {}));
+  }
 
   // URL 验证（op=13）：按官方要求用 secret 派生私钥签 event_ts+plain_token 并回显 JSON
   if (payload.op === 13) {

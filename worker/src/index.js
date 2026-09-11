@@ -20,7 +20,7 @@ function requireAuth(userId) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
@@ -45,7 +45,7 @@ export default {
 
       // QQ 官方机器人回调（公开路由，Ed25519 验签；配置在开放平台管理端）
       if (p === '/qq/callback' && request.method === 'POST') {
-        return handleCallback(request, env);
+        return handleCallback(request, env, ctx);
       }
 
       // QQ 机器人配置（Web 控制台「机器人」页；settings 优先，env/secret 兜底）
