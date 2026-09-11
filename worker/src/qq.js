@@ -10,12 +10,14 @@
 //   私聊：POST https://api.sgroup.qq.com/v2/users/{user_openid}/messages
 //   （私聊主动消息前提：对方加了机器人为好友，且未关闭「允许主动发送」开关）
 //
+// 配置来源（Web 控制台可改，保存即生效、无需重新部署）：
+//   AppID/AppSecret/触达目标 → settings 表（qq_app_id / qq_app_secret / qq_target）优先，
+//   env（QQ_APP_ID / QQ_APP_SECRET / QQ_TARGET，wrangler secret/vars）兜底。
+//   openid 相反：env 显式钉死优先（沙箱/多群场景），否则用回调自动捕获的存库值。
+//
 // openid 官方不提供查询接口，只能从事件里拿（回调 URL 配到本服务的 /api/qq/callback）：
 //   群绑定：在群里 @机器人 说一句话 → GROUP_AT_MESSAGE_CREATE 自动存 qq_group_openid
 //   私聊绑定：私聊机器人发一句话     → C2C_MESSAGE_CREATE 自动存 qq_user_openid
-//
-// 触达目标由 QQ_TARGET 控制（wrangler.toml [vars]，group / c2c / both，默认 group）：
-//   both 时对已捕获的 openid 逐个发送，未捕获的目标自动跳过（报错只记日志不丢消息）。
 //
 // 回调安全：QQ 平台对每个事件用 Ed25519 签名（X-Signature-Ed25519，密钥 seed = AppSecret），
 // 这里用 tweetnacl 从 seed 派生公钥做验签；URL 验证（op=13）按官方要求回显 AppSecret 明文。
@@ -26,27 +28,11 @@ const TOKEN_API = 'https://bots.qq.com/app/getAppAccessToken';
 const API_BASE = 'https://api.sgroup.qq.com';
 const GROUP_OPENID_KEY = 'qq_group_openid';
 const USER_OPENID_KEY = 'qq_user_openid';
+const VALID_TARGETS = ['group', 'c2c', 'both'];
 
-// Worker 同一 isolate 内复用 token；提前 2 分钟刷新，避免用到已过期的值
-let tokenCache = { token: '', expireAt: 0 };
-
-export async function getAccessToken(env) {
-  const now = Date.now();
-  if (tokenCache.token && now < tokenCache.expireAt) return tokenCache.token;
-
-  const res = await fetch(TOKEN_API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ appId: env.QQ_APP_ID, clientSecret: env.QQ_APP_SECRET }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.access_token) {
-    throw new Error(`qq_token_failed ${res.status}: ${JSON.stringify(data).slice(0, 200)}`);
-  }
-  const ttl = Math.max(parseInt(data.expires_in || '7200', 10) - 120, 300);
-  tokenCache = { token: data.access_token, expireAt: now + ttl * 1000 };
-  return tokenCache.token;
-}
+// Worker 同一 isolate 内复用 token；key 含凭证指纹 —— Web 改配置后旧 token 自动失效；
+// 提前 2 分钟刷新，避免用到已过期的值
+let tokenCache = { key: '', token: '', expireAt: 0 };
 
 /* ---------------- settings 键值存取（0010 迁移的表） ---------------- */
 
@@ -61,26 +47,71 @@ export async function setSetting(env, key, value) {
   ).bind(key, value).run();
 }
 
+export async function delSetting(env, key) {
+  await env.DB.prepare('DELETE FROM settings WHERE k=?').bind(key).run();
+}
+
+/* ---------------- 配置解析 ---------------- */
+
+function normalizeTarget(t) {
+  const s = String(t || '').trim().toLowerCase();
+  return VALID_TARGETS.includes(s) ? s : 'group';
+}
+
+// 凭证与触达目标：settings 优先（Web 配置的值覆盖 env），env/secret 兜底
+export async function resolveBotConfig(env) {
+  const [appId, appSecret, target] = await Promise.all([
+    getSetting(env, 'qq_app_id'),
+    getSetting(env, 'qq_app_secret'),
+    getSetting(env, 'qq_target'),
+  ]);
+  return {
+    appId: appId || env.QQ_APP_ID || '',
+    appSecret: appSecret || env.QQ_APP_SECRET || '',
+    target: normalizeTarget(target || env.QQ_TARGET),
+  };
+}
+
+// 触达目标列表：group=只发群 / c2c=只发私聊 / both=都发
+export function targetKinds(target) {
+  if (target === 'both') return ['group', 'c2c'];
+  if (target === 'c2c') return ['c2c'];
+  return ['group'];
+}
+
 // openid：env 显式配置优先（沙箱/多群/固定好友场景可钉死），否则用回调自动捕获的
-async function getOpenid(env, kind) {
+export async function getOpenid(env, kind) {
   const envKey = kind === 'group' ? 'QQ_GROUP_OPENID' : 'QQ_USER_OPENID';
   if (env[envKey]) return env[envKey];
   return getSetting(env, kind === 'group' ? GROUP_OPENID_KEY : USER_OPENID_KEY);
 }
 
-// 触达目标：QQ_TARGET=group|c2c|both（默认 group）；非法值一律回落 group
-export function getTargetKinds(env) {
-  const t = String(env.QQ_TARGET || 'group').trim().toLowerCase();
-  if (t === 'both') return ['group', 'c2c'];
-  if (t === 'c2c') return ['c2c'];
-  return ['group'];
-}
-
 /* ---------------- 发送 ---------------- */
 
+export async function getAccessToken(env, cfg, force = false) {
+  const now = Date.now();
+  const key = cfg.appId + '|' + cfg.appSecret;
+  if (!force && tokenCache.token && tokenCache.key === key && now < tokenCache.expireAt) {
+    return tokenCache.token;
+  }
+
+  const res = await fetch(TOKEN_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ appId: cfg.appId, clientSecret: cfg.appSecret }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) {
+    throw new Error(`qq_token_failed ${res.status}: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+  const ttl = Math.max(parseInt(data.expires_in || '7200', 10) - 120, 300);
+  tokenCache = { key, token: data.access_token, expireAt: now + ttl * 1000 };
+  return tokenCache.token;
+}
+
 // text：title 与 body 已由调用方拼好。返回 true；任何失败向上抛（由 deliver 隔离）。
-async function postMessage(env, kind, openid, text) {
-  const token = await getAccessToken(env);
+async function postMessage(env, cfg, kind, openid, text) {
+  const token = await getAccessToken(env, cfg);
   const path = kind === 'group' ? 'groups' : 'users';
   const res = await fetch(`${API_BASE}/v2/${path}/${encodeURIComponent(openid)}/messages`, {
     method: 'POST',
@@ -95,20 +126,20 @@ async function postMessage(env, kind, openid, text) {
   return true;
 }
 
-export async function sendGroupMessage(env, text) {
+export async function sendGroupMessage(env, cfg, text) {
   const openid = await getOpenid(env, 'group');
   if (!openid) {
     throw new Error('qq_group_openid 未配置：在 QQ 群里 @机器人 发一条消息即可自动绑定');
   }
-  return postMessage(env, 'group', openid, text);
+  return postMessage(env, cfg, 'group', openid, text);
 }
 
-export async function sendC2CMessage(env, text) {
+export async function sendC2CMessage(env, cfg, text) {
   const openid = await getOpenid(env, 'c2c');
   if (!openid) {
     throw new Error('qq_user_openid 未配置：先加机器人为好友，再私聊它发一条消息即可自动绑定');
   }
-  return postMessage(env, 'c2c', openid, text);
+  return postMessage(env, cfg, 'c2c', openid, text);
 }
 
 /* ---------------- 回调（/api/qq/callback） ---------------- */
@@ -145,8 +176,9 @@ function verifySignature(secret, sigHex, timestamp, rawBody) {
 //   3) C2C_MESSAGE_CREATE：捕获 user_openid 存库（私聊绑定 / 好友换号自动更新）
 //   其余事件：验签后忽略（当前只用它拿 openid）
 export async function handleCallback(request, env) {
-  if (!env.QQ_APP_ID || !env.QQ_APP_SECRET) {
-    return json({ error: 'qq bot not configured (set QQ_APP_ID / QQ_APP_SECRET via wrangler secret)' }, 500);
+  const cfg = await resolveBotConfig(env);
+  if (!cfg.appId || !cfg.appSecret) {
+    return json({ error: 'qq bot not configured (set in web console, or QQ_APP_ID / QQ_APP_SECRET via wrangler secret)' }, 500);
   }
   const raw = await request.text();
   let payload;
@@ -154,12 +186,12 @@ export async function handleCallback(request, env) {
 
   // URL 验证放行（验签公钥同样来自 secret，官方流程即为回显 secret）
   if (payload.op === 13) {
-    return new Response(env.QQ_APP_SECRET, { headers: { 'Content-Type': 'text/html' } });
+    return new Response(cfg.appSecret, { headers: { 'Content-Type': 'text/html' } });
   }
 
   const sig = request.headers.get('X-Signature-Ed25519') || '';
   const ts = request.headers.get('X-Signature-Timestamp') || '';
-  if (!verifySignature(env.QQ_APP_SECRET, sig, ts, raw)) {
+  if (!verifySignature(cfg.appSecret, sig, ts, raw)) {
     return json({ error: 'invalid signature' }, 401);
   }
 
@@ -176,4 +208,60 @@ export async function handleCallback(request, env) {
     }
   }
   return json({ ok: true });
+}
+
+/* ---------------- Web 控制台配置接口（需登录，路由挂 /api/qq/*） ---------------- */
+
+const mask = (s) => (!s ? '' : s.length <= 8 ? '****' : s.slice(0, 4) + '****' + s.slice(-4));
+
+// GET /api/qq/config —— 当前配置视图（secret/openid 只回掩码，不回明文）
+export async function getBotConfigView(request, env, userId) {
+  const cfg = await resolveBotConfig(env);
+  const [groupOpenid, userOpenid] = await Promise.all([getOpenid(env, 'group'), getOpenid(env, 'c2c')]);
+  return json({
+    app_id: cfg.appId,
+    has_secret: !!cfg.appSecret,
+    secret_masked: mask(cfg.appSecret),
+    target: cfg.target,
+    group_openid: groupOpenid || '',
+    user_openid: userOpenid || '',
+  });
+}
+
+// PUT /api/qq/config —— 更新配置（字段不传不改）：
+//   app_id：传空串清除（回落 env）；app_secret：空串 = 保持不变（表单留空语义），传值即覆盖；
+//   clear_secret=true 删除 Web 存的 secret（回落 env）；target ∈ group/c2c/both。
+export async function updateBotConfig(request, env, userId) {
+  const b = await request.json().catch(() => null);
+  if (!b || typeof b !== 'object') return json({ error: 'bad json' }, 400);
+  if (b.app_id !== undefined) {
+    const v = String(b.app_id).trim();
+    if (v) await setSetting(env, 'qq_app_id', v);
+    else await delSetting(env, 'qq_app_id');
+  }
+  if (b.app_secret !== undefined && String(b.app_secret) !== '') {
+    await setSetting(env, 'qq_app_secret', String(b.app_secret));
+  }
+  if (b.clear_secret) await delSetting(env, 'qq_app_secret');
+  if (b.target !== undefined) {
+    if (!VALID_TARGETS.includes(String(b.target).trim().toLowerCase())) {
+      return json({ error: 'target 必须是 group / c2c / both' }, 400);
+    }
+    await setSetting(env, 'qq_target', normalizeTarget(b.target));
+  }
+  return json({ ok: true });
+}
+
+// POST /api/qq/test —— 用当前配置真实换取一次 access_token，验证凭证有效性（不发任何消息）
+export async function testBotConfig(request, env, userId) {
+  const cfg = await resolveBotConfig(env);
+  if (!cfg.appId || !cfg.appSecret) {
+    return json({ ok: false, error: '尚未配置 AppID/AppSecret' });
+  }
+  try {
+    await getAccessToken(env, cfg, true);
+    return json({ ok: true });
+  } catch (err) {
+    return json({ ok: false, error: String(err).slice(0, 300) });
+  }
 }

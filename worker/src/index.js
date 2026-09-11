@@ -4,7 +4,7 @@ import { register, login, changePassword, verifyJWT } from './auth.js';
 import { createKey, listKeys, updateKey, deleteKey } from './keys.js';
 import { listNotifications, getNotification, markRead, deleteNotification, clearNotifications } from './notifications.js';
 import { handleWebhook } from './webhook.js';
-import { handleCallback } from './qq.js';
+import { handleCallback, getBotConfigView, updateBotConfig, testBotConfig } from './qq.js';
 import { listJobs, createJob, updateJob, deleteJob, runDueJobs } from './jobs.js';
 
 async function getUserId(request, env) {
@@ -46,6 +46,23 @@ export default {
       // QQ 官方机器人回调（公开路由，Ed25519 验签；配置在开放平台管理端）
       if (p === '/qq/callback' && request.method === 'POST') {
         return handleCallback(request, env);
+      }
+
+      // QQ 机器人配置（Web 控制台「机器人」页；settings 优先，env/secret 兜底）
+      if (p === '/qq/config' && request.method === 'GET') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return getBotConfigView(request, env, uid);
+      }
+      if (p === '/qq/config' && request.method === 'PUT') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return updateBotConfig(request, env, uid);
+      }
+      if (p === '/qq/test' && request.method === 'POST') {
+        const uid = await getUserId(request, env);
+        const e = requireAuth(uid); if (e) return e;
+        return testBotConfig(request, env, uid);
       }
 
       // 账号
