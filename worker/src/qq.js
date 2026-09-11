@@ -230,6 +230,7 @@ export async function handleCallback(request, env, ctx) {
   const sig = request.headers.get('X-Signature-Ed25519') || '';
   const ts = request.headers.get('X-Signature-Timestamp') || '';
   if (!verifySignature(cfg.appSecret, sig, ts, raw)) {
+    logProbe({ sig_ok: false, sig: sig.slice(0, 32), ts });
     return json({ error: 'invalid signature' }, 401);
   }
   logProbe({ sig_ok: true });
