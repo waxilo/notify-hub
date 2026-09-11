@@ -32,6 +32,7 @@ deleted_classes = ["PushHub"]
 # openid 自动捕获：群里 @机器人 → qq_group_openid；私聊机器人 → qq_user_openid。
 # 如需固定目标（沙箱/多群/指定好友），可额外：wrangler secret put QQ_GROUP_OPENID / QQ_USER_OPENID
 #
-# 触达目标：group=只发群（默认）/ c2c=只发私聊 / both=都发（改完需 wrangler deploy 生效）
+# 触达目标：c2c=只发私聊（当前调试单聊）/ group=只发群 / both=都发。
+# 这是「未在 Web 配置」时的兜底值；Web 控制台「机器人」页配置的值优先于此处。
 [vars]
-QQ_TARGET = "group"
+QQ_TARGET = "c2c"

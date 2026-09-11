@@ -367,6 +367,18 @@ ck('未捕获私聊 openid 时通知仍入库', countAll() === notifBeforeE + 1,
 ck('未捕获私聊 openid 时 delivered_at 为空',
   db.prepare('SELECT delivered_at FROM notifications WHERE body=?').get('没配私聊').delivered_at === null);
 
+// 17f) Web 控制台配置的凭证（settings）优先于 env：token 请求应带 settings 里的 appId
+db.prepare("INSERT INTO settings (k, v) VALUES ('qq_app_id', 'SETTINGS_APP') ON CONFLICT(k) DO UPDATE SET v=excluded.v").run();
+db.prepare("INSERT INTO settings (k, v) VALUES ('qq_app_secret', 'SETTINGS_SECRET') ON CONFLICT(k) DO UPDATE SET v=excluded.v").run();
+const tokBefore = qqTokenCalls.length;
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('settings凭证'), { method: 'GET' }), env, 'k3');
+ck('settings 凭证优先于 env', hr.status === 201 && qqTokenCalls.length === tokBefore + 1
+  && qqTokenCalls[qqTokenCalls.length - 1].appId === 'SETTINGS_APP'
+  && qqTokenCalls[qqTokenCalls.length - 1].clientSecret === 'SETTINGS_SECRET',
+  JSON.stringify(qqTokenCalls[qqTokenCalls.length - 1] || {}));
+ck('settings 凭证下消息照常投递', qqCalls[qqCalls.length - 1].kind === 'groups', JSON.stringify(qqCalls[qqCalls.length - 1] || {}));
+db.prepare("DELETE FROM settings WHERE k IN ('qq_app_id', 'qq_app_secret')").run();
+
 /* ---------------- createJob / updateJob 的写入路径 ---------------- */
 
 // 18) 这两条曾经出问题：updateJob 的 SQL 加了占位符却忘了定义对应变量（线上 500），
