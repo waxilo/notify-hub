@@ -48,7 +48,6 @@ const ROUTES = [
   ['GET', '/api/qq/config', 'QQ 机器人配置视图'],
   ['PUT', '/api/qq/config', '更新 QQ 机器人配置'],
   ['POST', '/api/qq/test', 'QQ 机器人连接测试'],
-  ['POST', '/api/qq/listen', 'QQ openid 监听捕获（WS 客户端）'],
   ['POST', '/api/keys', '新建 key'],
   ['GET', '/api/keys', '列出 key'],
   ['PUT', '/api/keys/1', '编辑 key（改名称/模式/模板/启停）'],
@@ -96,13 +95,24 @@ const putKey = await hitBody('PUT', '/api/keys/1');
 ck('PUT 无 body 未鉴权时返回 401 而非 404', putKey.status === 401, `status=${putKey.status} body=${putKey.body.slice(0, 80)}`);
 
 console.log('\n---- QQ 回调行为 ----');
-// url_validation（op=13）：官方要求在 5 秒内原样返回 AppSecret 明文
+// url_validation（op=13）：官方算法 —— 签名消息 = event_ts + plain_token，
+// 用 secret 重复填充至 32 字节派生的 Ed25519 私钥签名，返回 {plain_token, signature}
+const TOKEN_V = 'Arq0D5A61EgUu4OxUvOp';
+const TS_V = '1725442341';
 const uv = await hitBody('POST', '/api/qq/callback', {
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ op: 13, d: {} }),
+  body: JSON.stringify({ op: 13, d: { plain_token: TOKEN_V, event_ts: TS_V } }),
 });
-ck('url_validation 回显 AppSecret 明文', uv.status === 200 && uv.body === 'TEST_APP_SECRET',
-  `status=${uv.status} body=${uv.body.slice(0, 40)}`);
+let seedV = 'TEST_APP_SECRET';
+while (seedV.length < 32) seedV = seedV.repeat(2);
+const { secretKey: secretKeyV } = nacl.sign.keyPair.fromSeed(new TextEncoder().encode(seedV.slice(0, 32)));
+const sigV = [...nacl.sign.detached(new TextEncoder().encode(TS_V + TOKEN_V), secretKeyV)]
+  .map((b) => b.toString(16).padStart(2, '0')).join('');
+let uvBody = null;
+try { uvBody = JSON.parse(uv.body); } catch { /* not json */ }
+ck('url_validation 返回 {plain_token, signature} 且签名正确',
+  uv.status === 200 && uvBody && uvBody.plain_token === TOKEN_V && uvBody.signature === sigV,
+  `status=${uv.status} body=${uv.body.slice(0, 60)}`);
 
 // 伪造事件（无有效签名）必须拒绝
 const forged = await hitBody('POST', '/api/qq/callback', {

@@ -19,8 +19,8 @@
 //   群绑定：在群里 @机器人 说一句话 → GROUP_AT_MESSAGE_CREATE 自动存 qq_group_openid
 //   私聊绑定：私聊机器人发一句话     → C2C_MESSAGE_CREATE 自动存 qq_user_openid
 //
-// 回调安全：QQ 平台对每个事件用 Ed25519 签名（X-Signature-Ed25519，密钥 seed = AppSecret），
-// 这里用 tweetnacl 从 seed 派生公钥做验签；URL 验证（op=13）按官方要求回显 AppSecret 明文。
+// 回调安全：QQ 平台对每个事件用 Ed25519 签名（X-Signature-Ed25519，seed = AppSecret 重复填充至 32 字节），
+// 这里用 tweetnacl 派生公钥验签；URL 验证（op=13）按官方要求返回 {plain_token, signature}。
 import nacl from 'tweetnacl';
 import { json } from './utils.js';
 
@@ -144,6 +144,13 @@ export async function sendC2CMessage(env, cfg, text) {
 
 /* ---------------- 回调（/api/qq/callback） ---------------- */
 
+// 官方 seed 派生（sign.html）：secret 不足 32 字节时 repeat 填充后截取 32 字节
+function seedFromSecret(secret) {
+  let s = String(secret || '');
+  while (s.length < 32) s = s.repeat(2);
+  return new TextEncoder().encode(s.slice(0, 32));
+}
+
 function hexToBytes(hex) {
   if (!hex || hex.length % 2) return null;
   const out = new Uint8Array(hex.length / 2);
@@ -155,23 +162,34 @@ function hexToBytes(hex) {
   return out;
 }
 
-// AppSecret 是 Ed25519 私钥的 seed（32 字节）；从中派生公钥用于验签
+// AppSecret 派生 Ed25519 私钥（官方算法：seed = secret 重复填充至 32 字节）；
+// 事件验签的消息 = timestamp + body（官方 sign.html）
 function verifySignature(secret, sigHex, timestamp, rawBody) {
-  const seed = new TextEncoder().encode(String(secret || ''));
-  if (seed.length !== 32) return false;
   const sig = hexToBytes(sigHex);
   if (!sig || sig.length !== 64) return false;
   const msg = new TextEncoder().encode(String(timestamp) + String(rawBody));
   try {
-    const { publicKey } = nacl.sign.keyPair.fromSeed(seed);
+    const { publicKey } = nacl.sign.keyPair.fromSeed(seedFromSecret(secret));
     return nacl.sign.detached.verify(msg, sig, publicKey);
   } catch {
     return false;
   }
 }
 
+// op=13 URL 验证（官方 event-emit.html）：签名消息 = event_ts + plain_token，
+// 用 seed=secret 的 Ed25519 私钥签名，返回 {plain_token, signature}（hex）
+function bytesToHex(bytes) {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function validationResponse(secret, plainToken, eventTs) {
+  const msg = new TextEncoder().encode(String(eventTs || '') + String(plainToken || ''));
+  const { secretKey } = nacl.sign.keyPair.fromSeed(seedFromSecret(secret));
+  return { plain_token: plainToken, signature: bytesToHex(nacl.sign.detached(msg, secretKey)) };
+}
+
 // QQ 平台回调入口（公开路由，靠 Ed25519 验签保证来源可信）：
-//   1) op=13（URL 验证）：官方要求在 5 秒内原样返回 AppSecret 明文（非 JSON）
+//   1) op=13（URL 验证）：签 event_ts+plain_token 返回 {plain_token, signature}
 //   2) GROUP_AT_MESSAGE_CREATE：捕获 group_openid 存库（首次绑定 / 换群自动更新）
 //   3) C2C_MESSAGE_CREATE：捕获 user_openid 存库（私聊绑定 / 好友换号自动更新）
 //   其余事件：验签后忽略（当前只用它拿 openid）
@@ -184,9 +202,11 @@ export async function handleCallback(request, env) {
   let payload;
   try { payload = JSON.parse(raw); } catch { return json({ error: 'bad json' }, 400); }
 
-  // URL 验证放行（验签公钥同样来自 secret，官方流程即为回显 secret）
+  // URL 验证（op=13）：按官方要求用 secret 派生私钥签 event_ts+plain_token 并回显 JSON
   if (payload.op === 13) {
-    return new Response(cfg.appSecret, { headers: { 'Content-Type': 'text/html' } });
+    const d = payload.d || {};
+    if (!d.plain_token) return json({ error: 'missing plain_token' }, 400);
+    return json(validationResponse(cfg.appSecret, d.plain_token, d.event_ts));
   }
 
   const sig = request.headers.get('X-Signature-Ed25519') || '';
@@ -208,90 +228,6 @@ export async function handleCallback(request, env) {
     }
   }
   return json({ ok: true });
-}
-
-/* ---------------- WebSocket 监听捕获 openid ---------------- */
-
-// 机器人保持默认的 WebSocket 推送模式时没有回调地址可配，
-// 这里临时充当 WS 客户端连上 QQ 网关监听事件，把发消息的人/群 openid 抓下来入库。
-// intents 1<<25 = GROUP_AND_C2C_EVENT（群消息 + 私聊消息）。
-// 协议（官方文档「使用 Websocket 接入」）：op10 Hello → op2 Identify(token=QQBot <token>)
-//   → op0 Dispatch（t=C2C_MESSAGE_CREATE 时 openid 在 d.author.user_openid）→ op1 心跳带最新 s。
-export async function captureOpenids(env, cfg, seconds = 55) {
-  const token = await getAccessToken(env, cfg);
-  const gwRes = await fetch('https://api.sgroup.qq.com/gateway', {
-    headers: { Authorization: `QQBot ${token}` },
-  });
-  const gw = await gwRes.json().catch(() => ({}));
-  if (!gwRes.ok || !gw.url) {
-    throw new Error(`qq_gateway_failed ${gwRes.status}: ${JSON.stringify(gw).slice(0, 200)}`);
-  }
-
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(gw.url);
-    ws.accept();
-    const captured = {};
-    let lastSeq = 0;
-    let heartbeatTimer = null;
-    let finishTimer = null;
-    let done = false;
-
-    const finish = (err) => {
-      if (done) return;
-      done = true;
-      clearTimeout(finishTimer);
-      clearInterval(heartbeatTimer);
-      try { ws.close(1000, 'notify-hub done'); } catch { /* already closed */ }
-      if (err) reject(err);
-      else resolve(captured);
-    };
-
-    // 总窗口：到点收工（捕获到的东西可能为空，由调用方判断）
-    finishTimer = setTimeout(() => finish(), seconds * 1000);
-
-    ws.addEventListener('message', (ev) => {
-      let p;
-      try { p = JSON.parse(ev.data); } catch { return; }
-      if (p.s) lastSeq = p.s;
-
-      if (p.op === 10) {
-        // Hello：立即鉴权，并按网关给的周期发心跳（保活 55 秒足够）
-        ws.send(JSON.stringify({
-          op: 2,
-          d: {
-            token: `QQBot ${token}`,
-            intents: 1 << 25,
-            shard: [0, 1],
-            properties: { $os: 'cloudflare-worker', $browser: 'notify-hub', $device: 'notify-hub' },
-          },
-        }));
-        heartbeatTimer = setInterval(() => {
-          try { ws.send(JSON.stringify({ op: 1, d: lastSeq })); } catch { /* closing */ }
-        }, Math.max((p.d && p.d.heartbeat_interval) || 45000, 5000));
-        return;
-      }
-      if (p.op === 9) {
-        finish(new Error('qq_ws_invalid_session（intents 未开通或凭证无效）'));
-        return;
-      }
-      if (p.op === 0 && p.d) {
-        if (p.t === 'C2C_MESSAGE_CREATE') {
-          const oid = (p.d.author && p.d.author.user_openid) || p.d.user_openid;
-          if (oid) captured.user_openid = oid;
-        }
-        if (p.t === 'GROUP_AT_MESSAGE_CREATE' && p.d.group_openid) {
-          captured.group_openid = p.d.group_openid;
-        }
-        if (captured.user_openid || captured.group_openid) {
-          // 拿到即再等 1 秒（防群/私聊两个事件连发），然后收工
-          clearTimeout(finishTimer);
-          finishTimer = setTimeout(() => finish(), 1000);
-        }
-      }
-    });
-    ws.addEventListener('error', () => finish(new Error('qq_ws_error（网关连接失败）')));
-    ws.addEventListener('close', () => finish());
-  });
 }
 
 /* ---------------- Web 控制台配置接口（需登录，路由挂 /api/qq/*） ---------------- */
@@ -348,23 +284,4 @@ export async function testBotConfig(request, env, userId) {
   } catch (err) {
     return json({ ok: false, error: String(err).slice(0, 300) });
   }
-}
-
-// POST /api/qq/listen —— 连 QQ 网关监听最多 55 秒，捕获私聊/群里发来的 openid 并入库。
-// 适用于机器人保持默认 WebSocket 推送模式的场景（无需在开放平台配回调地址）。
-export async function listenOpenids(request, env, userId) {
-  const cfg = await resolveBotConfig(env);
-  if (!cfg.appId || !cfg.appSecret) {
-    return json({ ok: false, error: '尚未配置 AppID/AppSecret' });
-  }
-  let captured;
-  try {
-    captured = await captureOpenids(env, cfg, 55);
-  } catch (err) {
-    return json({ ok: false, error: String(err).slice(0, 300) });
-  }
-  if (captured.user_openid) await setSetting(env, USER_OPENID_KEY, captured.user_openid);
-  if (captured.group_openid) await setSetting(env, GROUP_OPENID_KEY, captured.group_openid);
-  const any = captured.user_openid || captured.group_openid;
-  return json({ ok: !!any, captured });
 }

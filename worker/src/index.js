@@ -4,7 +4,7 @@ import { register, login, changePassword, verifyJWT } from './auth.js';
 import { createKey, listKeys, updateKey, deleteKey } from './keys.js';
 import { listNotifications, getNotification, markRead, deleteNotification, clearNotifications } from './notifications.js';
 import { handleWebhook } from './webhook.js';
-import { handleCallback, getBotConfigView, updateBotConfig, testBotConfig, listenOpenids } from './qq.js';
+import { handleCallback, getBotConfigView, updateBotConfig, testBotConfig } from './qq.js';
 import { listJobs, createJob, updateJob, deleteJob, runDueJobs } from './jobs.js';
 
 async function getUserId(request, env) {
@@ -63,11 +63,6 @@ export default {
         const uid = await getUserId(request, env);
         const e = requireAuth(uid); if (e) return e;
         return testBotConfig(request, env, uid);
-      }
-      if (p === '/qq/listen' && request.method === 'POST') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return listenOpenids(request, env, uid);
       }
 
       // 账号

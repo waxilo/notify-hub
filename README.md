@@ -37,10 +37,10 @@
    ```
    https://notify-hub-worker.sloan.dpdns.org/api/qq/callback
    ```
-   平台做 URL 验证时，本服务会按官方要求回显 AppSecret；之后所有事件都会带 Ed25519 签名（密钥 seed = AppSecret），Worker 侧验签后才处理。
+   平台做 URL 验证时，本服务按官方算法用 AppSecret 派生 Ed25519 私钥签 `event_ts + plain_token` 并返回 `{plain_token, signature}`；之后所有事件都带 Ed25519 签名（seed = AppSecret 重复填充至 32 字节），Worker 侧验签后才处理。
 4. **绑定触达目标**（openid 自动捕获存 D1 `settings` 表，「机器人」页可见绑定状态）：
-   - **推荐：WebSocket 监听捕获**（机器人保持默认 WebSocket 推送模式，无需配回调地址）：在 Web「机器人」页点「开始捕获」，55 秒内 **私聊机器人发任意一句话**（绑私聊）或 **在群里 @机器人**（绑群）即自动入库。
-   - **Webhook 回调**（可选）：在管理端「事件订阅与回调地址」把推送方式切到 Webhook（**切后无法切回 WebSocket**），回调地址填 `https://notify-hub-worker.sloan.dpdns.org/api/qq/callback`。之后私聊/群事件里的 openid 会被自动捕获。
+   - **绑定 QQ 私聊（当前使用）**：在 QQ 里搜索/添加机器人为好友（沙箱成员扫码即可），然后 **私聊机器人发一句话** → `C2C_MESSAGE_CREATE` 自动捕获 `user_openid`。
+   - **绑定 QQ 群**：把机器人拉进你的 QQ 群，在群里 **@机器人 随便说句话** → `GROUP_AT_MESSAGE_CREATE` 自动捕获 `group_openid`。换群：在新群里再 @一次 即自动切换。
    - 多群/固定目标（可选）：`npx wrangler secret put QQ_GROUP_OPENID` / `QQ_USER_OPENID` 显式指定，优先于自动捕获。
 5. **选择触达目标**：Web 控制台「机器人」页直接切（私聊 / 群 / 都发，保存即生效）；`wrangler.toml` 的 `[vars] QQ_TARGET` 只是未在 Web 配置时的兜底值（当前为 `c2c`）。
 6. **验证**：浏览器访问 `https://…/hook/<KEY>?message=hello`，QQ 群/私聊应收到「key 名称 + hello」。

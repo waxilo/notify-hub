@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
 import { API_BASE } from './config.js?v=20260911c';
-import { api, setToken, isLoggedIn } from './api.js?v=20260911e';
+import { api, setToken, isLoggedIn } from './api.js?v=20260911f';
 
 
 const $ = (sel) => document.querySelector(sel);
@@ -142,12 +142,10 @@ async function renderQQBot() {
     </div>
     <div class="card">
       <h2>绑定状态（openid 自动捕获）</h2>
-      <p class="hint">QQ 群：${c.group_openid ? `<code>${escapeHtml(c.group_openid)}</code>（已绑定）` : '<b class="warn">未绑定</b>'}</p>
-      <p class="hint">QQ 私聊：${c.user_openid ? `<code>${escapeHtml(c.user_openid)}</code>（已绑定）` : '<b class="warn">未绑定</b>'}</p>
-      <p class="hint xs">机器人保持默认的 <b>WebSocket 推送模式</b>即可，无需在开放平台配置回调地址 —— 点下方按钮，服务端会连上 QQ 网关监听 55 秒，期间用手机 QQ <b>私聊机器人发任意一句话</b>（群聊绑定则在群里 @机器人）即自动捕获入库。换群 / 换好友：重新捕获一次即自动更新。</p>
-      <p><button type="button" class="btn primary" id="qq-listen">开始捕获（监听 55 秒）</button></p>
-      <p class="msg" id="qq-listen-msg"></p>
-      <p class="hint xs">私聊主动消息要求对方未关闭「允许主动发送」开关（默认开）。若确需 Webhook 模式：在管理端「事件订阅与回调地址」切换（<b>切到 Webhook 后无法切回 WebSocket</b>），回调地址填 <code>${escapeHtml(API_BASE)}/api/qq/callback</code>。</p>
+      <p class="hint">QQ 群：${c.group_openid ? `<code>${escapeHtml(c.group_openid)}</code>（已绑定）` : '<b class="warn">未绑定</b> —— 把机器人拉进群，在群里 @它 说句话'}</p>
+      <p class="hint">QQ 私聊：${c.user_openid ? `<code>${escapeHtml(c.user_openid)}</code>（已绑定）` : '<b class="warn">未绑定</b> —— 加机器人为好友，私聊它发一句话'}</p>
+      <p class="hint xs">openid 在机器人<b>收到第一条对应消息</b>时自动捕获入库（事件走 Webhook 推送）。换群 / 换好友绑定：重新触发一次对应事件即自动更新。</p>
+      <p class="hint xs">开放平台管理端需已切换为 <b>WebHook 模式</b>，回调地址填：<code>${escapeHtml(API_BASE)}/api/qq/callback</code>（URL 验证按官方算法自动完成）。</p>
     </div>`;
 
   const form = $('#qq-form');
@@ -175,28 +173,6 @@ async function renderQQBot() {
       msg.textContent = r.ok ? '✓ 连接成功：凭证有效' : `✗ 连接失败：${r.error || '未知错误'}`;
     } catch (err) {
       msg.textContent = err.message;
-    }
-  };
-  const listenBtn = $('#qq-listen');
-  const listenMsg = $('#qq-listen-msg');
-  listenBtn.onclick = async () => {
-    listenBtn.disabled = true;
-    listenMsg.textContent = '监听中（最多 55 秒）……请现在用手机 QQ 私聊机器人发任意一句话（群聊绑定则在群里 @机器人）';
-    try {
-      const r = await api.listenQQ();
-      if (r.ok && r.captured) {
-        const parts = [];
-        if (r.captured.user_openid) parts.push(`私聊 openid 已捕获并入库`);
-        if (r.captured.group_openid) parts.push(`群 openid 已捕获并入库`);
-        listenMsg.textContent = `✓ ${parts.join('；')}`;
-        setTimeout(renderQQBot, 1200);
-      } else {
-        listenMsg.textContent = `✗ 没有捕获到事件：${r.error || '监听窗口内未收到任何私聊/群消息，请确认已加好友并在监听期间发了消息'}`;
-      }
-    } catch (err) {
-      listenMsg.textContent = `✗ ${err.message}`;
-    } finally {
-      listenBtn.disabled = false;
     }
   };
 }
