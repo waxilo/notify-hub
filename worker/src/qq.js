@@ -204,22 +204,27 @@ export async function handleCallback(request, env, ctx) {
 
   // 请求留痕（排查回调配置问题用；只保留最近一次）。
   // 平台要求验证响应在 3 秒内返回，留痕写入必须移出响应路径（waitUntil）
-  if (ctx && ctx.waitUntil) {
-    ctx.waitUntil(setSetting(env, 'qq_last_callback', JSON.stringify({
-      ts: new Date().toISOString(),
-      ua: request.headers.get('User-Agent') || '',
-      bot_appid: request.headers.get('X-Bot-Appid') || '',
-      op: payload.op,
-      d_keys: payload.d ? Object.keys(payload.d).join(',') : '',
-      raw: raw.slice(0, 2000),
-    })).catch(() => {}));
-  }
+  const logProbe = (extra) => {
+    if (ctx && ctx.waitUntil) {
+      ctx.waitUntil(setSetting(env, 'qq_last_callback', JSON.stringify({
+        ts: new Date().toISOString(),
+        ua: request.headers.get('User-Agent') || '',
+        bot_appid: request.headers.get('X-Bot-Appid') || '',
+        op: payload.op,
+        t: payload.t || '',
+        raw: raw.slice(0, 2000),
+        ...extra,
+      })).catch(() => {}));
+    }
+  };
 
   // URL 验证（op=13）：按官方要求用 secret 派生私钥签 event_ts+plain_token 并回显 JSON
   if (payload.op === 13) {
     const d = payload.d || {};
     if (!d.plain_token) return json({ error: 'missing plain_token' }, 400);
-    return json(validationResponse(cfg.appSecret, d.plain_token, d.event_ts));
+    const resp = validationResponse(cfg.appSecret, d.plain_token, d.event_ts);
+    logProbe({ resp_sig: resp.signature.slice(0, 32) });
+    return json(resp);
   }
 
   const sig = request.headers.get('X-Signature-Ed25519') || '';
@@ -227,6 +232,7 @@ export async function handleCallback(request, env, ctx) {
   if (!verifySignature(cfg.appSecret, sig, ts, raw)) {
     return json({ error: 'invalid signature' }, 401);
   }
+  logProbe({ sig_ok: true });
 
   if (payload.t === 'GROUP_AT_MESSAGE_CREATE' && payload.d && payload.d.group_openid) {
     const prev = await getSetting(env, GROUP_OPENID_KEY);
@@ -240,7 +246,8 @@ export async function handleCallback(request, env, ctx) {
       await setSetting(env, USER_OPENID_KEY, payload.d.user_openid);
     }
   }
-  return json({ ok: true });
+  // 官方 op 12 = HTTP Callback ACK：告知平台已收到推送（对齐 AstrBot/官方协议）
+  return json({ opcode: 12 });
 }
 
 /* ---------------- Web 控制台配置接口（需登录，路由挂 /api/qq/*） ---------------- */
