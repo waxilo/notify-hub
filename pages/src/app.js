@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
 import { API_BASE } from './config.js?v=20260911c';
-import { api, setToken, isLoggedIn } from './api.js?v=20260911h';
+import { api, setToken, isLoggedIn } from './api.js?v=20260911i';
 
 
 const $ = (sel) => document.querySelector(sel);
@@ -121,7 +121,7 @@ async function renderQQBot() {
   view.innerHTML = `
     <div class="card">
       <h2>机器人凭证</h2>
-      <p class="hint">还没有机器人？先去 <a href="https://q.qq.com/qqbot/dashboard/" target="_blank" rel="noopener">QQ 机器人管理端</a> 创建：<b>① 扫码登录 → ② 创建机器人</b>（个人身份证认证即可，龙虾私人机器人也走这里）→ <b>③ 开发设置里拿 AppID / AppSecret</b>（Secret 只显示一次，先复制好）→ ④ 回本页填写。也可以直接打开 <a href="https://q.qq.com/qqbot/dashboard/" target="_blank" rel="noopener">q.qq.com/qqbot/dashboard</a>。</p>
+      <p class="hint">还没有机器人？先去 <a href="https://q.qq.com/qqbot/dashboard/" target="_blank" rel="noopener">QQ 机器人管理端</a> 创建：<b>① 扫码登录 → ② 创建机器人</b>（个人身份证认证即可，龙虾私人机器人也走这里）→ <b>③ 开发设置里拿 AppID / AppSecret</b>（Secret 只显示一次，先复制好）→ ④ 回本页填写。</p>
       <form id="qq-form">
         <label>AppID<input name="app_id" value="${escapeHtml(c.app_id || '')}" placeholder="机器人 AppID" autocomplete="off" /></label>
         <label>AppSecret<input type="password" name="app_secret" value="" placeholder="${c.has_secret ? `已配置（${escapeHtml(c.secret_masked)}），留空保持不变` : '尚未配置'}" autocomplete="new-password" /></label>
@@ -133,7 +133,8 @@ async function renderQQBot() {
           </select>
         </label>
         <p class="hint xs">当前目标：<b>${QQ_TARGET_LABEL[c.target] || escapeHtml(c.target)}</b>。此处配置的凭证优先于服务端 env/secret（env 兜底）。</p>
-        <label>消息模板<textarea name="msg_template" rows="5" placeholder="${escapeHtml(c.msg_template || '')}">${escapeHtml(c.msg_template || '')}</textarea></label>
+        <label>消息模板</label>
+        <textarea name="msg_template" rows="6" spellcheck="false">${escapeHtml(c.msg_template || '')}</textarea>
         <p class="hint xs">推送文本按此模板渲染，支持占位符：<code>{title}</code> 通知标题（任务名 / key 名）、<code>{body}</code> 正文、<code>{time}</code> 发送时间。清空保存 = 恢复默认模板。QQ 文本消息仅支持纯文本排版。</p>
         <div class="modal-actions" style="display:flex;gap:8px">
           <button type="submit" class="btn primary">保存配置</button>
