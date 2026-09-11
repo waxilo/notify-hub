@@ -21,6 +21,11 @@ binding = "DB"
 database_name = "notify-hub"
 database_id = "2f5cf556-d3dd-4047-a55a-6c6613058c17"
 
+# Durable Object 类删除迁移：PushHub 随 App 推送链路一并移除（v1 时引入）
+[[migrations]]
+tag = "v2"
+deleted_classes = ["PushHub"]
+
 # QQ 官方机器人凭证与回调，全部用命令设置（不要写在这里）：
 #   wrangler secret put QQ_APP_ID
 #   wrangler secret put QQ_APP_SECRET
