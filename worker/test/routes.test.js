@@ -48,6 +48,7 @@ const ROUTES = [
   ['GET', '/api/qq/config', 'QQ 机器人配置视图'],
   ['PUT', '/api/qq/config', '更新 QQ 机器人配置'],
   ['POST', '/api/qq/test', 'QQ 机器人连接测试'],
+  ['POST', '/api/qq/listen', 'QQ openid 监听捕获（WS 客户端）'],
   ['POST', '/api/keys', '新建 key'],
   ['GET', '/api/keys', '列出 key'],
   ['PUT', '/api/keys/1', '编辑 key（改名称/模式/模板/启停）'],

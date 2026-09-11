@@ -74,4 +74,6 @@ export const api = {
   getQQConfig: () => req('/qq/config'),
   updateQQConfig: (body) => req('/qq/config', 'PUT', body),
   testQQ: () => req('/qq/test', 'POST', {}),
+  // 监听捕获 openid：服务端连 QQ 网关听 55 秒，期间私聊/群里@机器人即可（请求会挂到监听结束）
+  listenQQ: () => req('/qq/listen', 'POST', {}),
 };

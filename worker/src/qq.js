@@ -210,6 +210,90 @@ export async function handleCallback(request, env) {
   return json({ ok: true });
 }
 
+/* ---------------- WebSocket 监听捕获 openid ---------------- */
+
+// 机器人保持默认的 WebSocket 推送模式时没有回调地址可配，
+// 这里临时充当 WS 客户端连上 QQ 网关监听事件，把发消息的人/群 openid 抓下来入库。
+// intents 1<<25 = GROUP_AND_C2C_EVENT（群消息 + 私聊消息）。
+// 协议（官方文档「使用 Websocket 接入」）：op10 Hello → op2 Identify(token=QQBot <token>)
+//   → op0 Dispatch（t=C2C_MESSAGE_CREATE 时 openid 在 d.author.user_openid）→ op1 心跳带最新 s。
+export async function captureOpenids(env, cfg, seconds = 55) {
+  const token = await getAccessToken(env, cfg);
+  const gwRes = await fetch('https://api.sgroup.qq.com/gateway', {
+    headers: { Authorization: `QQBot ${token}` },
+  });
+  const gw = await gwRes.json().catch(() => ({}));
+  if (!gwRes.ok || !gw.url) {
+    throw new Error(`qq_gateway_failed ${gwRes.status}: ${JSON.stringify(gw).slice(0, 200)}`);
+  }
+
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(gw.url);
+    ws.accept();
+    const captured = {};
+    let lastSeq = 0;
+    let heartbeatTimer = null;
+    let finishTimer = null;
+    let done = false;
+
+    const finish = (err) => {
+      if (done) return;
+      done = true;
+      clearTimeout(finishTimer);
+      clearInterval(heartbeatTimer);
+      try { ws.close(1000, 'notify-hub done'); } catch { /* already closed */ }
+      if (err) reject(err);
+      else resolve(captured);
+    };
+
+    // 总窗口：到点收工（捕获到的东西可能为空，由调用方判断）
+    finishTimer = setTimeout(() => finish(), seconds * 1000);
+
+    ws.addEventListener('message', (ev) => {
+      let p;
+      try { p = JSON.parse(ev.data); } catch { return; }
+      if (p.s) lastSeq = p.s;
+
+      if (p.op === 10) {
+        // Hello：立即鉴权，并按网关给的周期发心跳（保活 55 秒足够）
+        ws.send(JSON.stringify({
+          op: 2,
+          d: {
+            token: `QQBot ${token}`,
+            intents: 1 << 25,
+            shard: [0, 1],
+            properties: { $os: 'cloudflare-worker', $browser: 'notify-hub', $device: 'notify-hub' },
+          },
+        }));
+        heartbeatTimer = setInterval(() => {
+          try { ws.send(JSON.stringify({ op: 1, d: lastSeq })); } catch { /* closing */ }
+        }, Math.max((p.d && p.d.heartbeat_interval) || 45000, 5000));
+        return;
+      }
+      if (p.op === 9) {
+        finish(new Error('qq_ws_invalid_session（intents 未开通或凭证无效）'));
+        return;
+      }
+      if (p.op === 0 && p.d) {
+        if (p.t === 'C2C_MESSAGE_CREATE') {
+          const oid = (p.d.author && p.d.author.user_openid) || p.d.user_openid;
+          if (oid) captured.user_openid = oid;
+        }
+        if (p.t === 'GROUP_AT_MESSAGE_CREATE' && p.d.group_openid) {
+          captured.group_openid = p.d.group_openid;
+        }
+        if (captured.user_openid || captured.group_openid) {
+          // 拿到即再等 1 秒（防群/私聊两个事件连发），然后收工
+          clearTimeout(finishTimer);
+          finishTimer = setTimeout(() => finish(), 1000);
+        }
+      }
+    });
+    ws.addEventListener('error', () => finish(new Error('qq_ws_error（网关连接失败）')));
+    ws.addEventListener('close', () => finish());
+  });
+}
+
 /* ---------------- Web 控制台配置接口（需登录，路由挂 /api/qq/*） ---------------- */
 
 const mask = (s) => (!s ? '' : s.length <= 8 ? '****' : s.slice(0, 4) + '****' + s.slice(-4));
@@ -264,4 +348,23 @@ export async function testBotConfig(request, env, userId) {
   } catch (err) {
     return json({ ok: false, error: String(err).slice(0, 300) });
   }
+}
+
+// POST /api/qq/listen —— 连 QQ 网关监听最多 55 秒，捕获私聊/群里发来的 openid 并入库。
+// 适用于机器人保持默认 WebSocket 推送模式的场景（无需在开放平台配回调地址）。
+export async function listenOpenids(request, env, userId) {
+  const cfg = await resolveBotConfig(env);
+  if (!cfg.appId || !cfg.appSecret) {
+    return json({ ok: false, error: '尚未配置 AppID/AppSecret' });
+  }
+  let captured;
+  try {
+    captured = await captureOpenids(env, cfg, 55);
+  } catch (err) {
+    return json({ ok: false, error: String(err).slice(0, 300) });
+  }
+  if (captured.user_openid) await setSetting(env, USER_OPENID_KEY, captured.user_openid);
+  if (captured.group_openid) await setSetting(env, GROUP_OPENID_KEY, captured.group_openid);
+  const any = captured.user_openid || captured.group_openid;
+  return json({ ok: !!any, captured });
 }
