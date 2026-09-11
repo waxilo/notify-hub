@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
 import { API_BASE } from './config.js?v=20260911c';
-import { api, setToken, isLoggedIn } from './api.js?v=20260911f';
+import { api, setToken, isLoggedIn } from './api.js?v=20260911g';
 
 
 const $ = (sel) => document.querySelector(sel);
@@ -133,6 +133,8 @@ async function renderQQBot() {
           </select>
         </label>
         <p class="hint xs">当前目标：<b>${QQ_TARGET_LABEL[c.target] || escapeHtml(c.target)}</b>。此处配置的凭证优先于服务端 env/secret（env 兜底）。</p>
+        <label>消息模板<textarea name="msg_template" rows="5" placeholder="${escapeHtml(c.msg_template || '')}">${escapeHtml(c.msg_template || '')}</textarea></label>
+        <p class="hint xs">推送文本按此模板渲染，支持占位符：<code>{title}</code> 通知标题（任务名 / key 名）、<code>{body}</code> 正文、<code>{time}</code> 发送时间。清空保存 = 恢复默认模板。QQ 文本消息仅支持纯文本排版。</p>
         <div class="modal-actions" style="display:flex;gap:8px">
           <button type="submit" class="btn primary">保存配置</button>
           <button type="button" class="btn" id="qq-test">测试连接</button>
@@ -152,7 +154,7 @@ async function renderQQBot() {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const F = form.elements;   // 不用 form.xxx：name 与 IDL 属性重名时 form.name 会返回表单自身特性
-    const body = { target: F.target.value };
+    const body = { target: F.target.value, msg_template: F.msg_template.value };
     if (F.app_id.value.trim()) body.app_id = F.app_id.value.trim();
     if (F.app_secret.value) body.app_secret = F.app_secret.value;
     const msg = $('#qq-msg');

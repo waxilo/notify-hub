@@ -43,7 +43,8 @@
    - **绑定 QQ 群**：把机器人拉进你的 QQ 群，在群里 **@机器人 随便说句话** → `GROUP_AT_MESSAGE_CREATE` 自动捕获 `group_openid`。换群：在新群里再 @一次 即自动切换。
    - 多群/固定目标（可选）：`npx wrangler secret put QQ_GROUP_OPENID` / `QQ_USER_OPENID` 显式指定，优先于自动捕获。
 5. **选择触达目标**：Web 控制台「机器人」页直接切（私聊 / 群 / 都发，保存即生效）；`wrangler.toml` 的 `[vars] QQ_TARGET` 只是未在 Web 配置时的兜底值（当前为 `c2c`）。
-6. **验证**：浏览器访问 `https://…/hook/<KEY>?message=hello`，QQ 群/私聊应收到「key 名称 + hello」。
+   - **消息模板**（同页可改）：推送文本按模板渲染，占位符 `{title}`（标题）/ `{body}`（正文）/ `{time}`（发送时间，UTC+8）。默认模板带分隔线与时间戳；清空保存 = 恢复默认。QQ 文本消息仅支持纯文本排版（markdown/ark 模板需平台白名单）。
+6. **验证**：浏览器访问 `https://…/hook/<KEY>?message=hello`，QQ 群/私聊应收到模板渲染后的通知。
 
 > 龙虾（OpenClaw）用户注意：`q.qq.com/qqbot/openclaw` 专用入口创建的「私人机器人」就是标准 QQ 机器人（同一套 AppID/AppSecret/OpenAPI），notify-hub 直接用它的凭证接入即可 —— **不需要部署 OpenClaw，也不需要任何网关容器**。私人机器人官方建议私聊为主，正适合本场景。
 >

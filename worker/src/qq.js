@@ -28,7 +28,17 @@ const TOKEN_API = 'https://bots.qq.com/app/getAppAccessToken';
 const API_BASE = 'https://api.sgroup.qq.com';
 const GROUP_OPENID_KEY = 'qq_group_openid';
 const USER_OPENID_KEY = 'qq_user_openid';
+const MSG_TEMPLATE_KEY = 'qq_msg_template';
 const VALID_TARGETS = ['group', 'c2c', 'both'];
+
+// QQ 文本消息（msg_type=0）只支持纯文本，靠排版字符做视觉分层；
+// markdown / ark 模板消息需平台白名单权限，普通机器人不可用
+export const DEFAULT_MSG_TEMPLATE =
+  '📢 {title}\n' +
+  '━━━━━━━━━━━━━━\n' +
+  '{body}\n' +
+  '\n' +
+  '🕐 {time}';
 
 // Worker 同一 isolate 内复用 token；key 含凭证指纹 —— Web 改配置后旧 token 自动失效；
 // 提前 2 分钟刷新，避免用到已过期的值
@@ -84,6 +94,33 @@ export async function getOpenid(env, kind) {
   const envKey = kind === 'group' ? 'QQ_GROUP_OPENID' : 'QQ_USER_OPENID';
   if (env[envKey]) return env[envKey];
   return getSetting(env, kind === 'group' ? GROUP_OPENID_KEY : USER_OPENID_KEY);
+}
+
+/* ---------------- 消息模板 ---------------- */
+
+// {time} 按中国时区（UTC+8）渲染：Worker 无本地时区，QQ 触达场景默认国内用户
+function formatTime() {
+  const d = new Date(Date.now() + 8 * 3_600_000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+export async function getMessageTemplate(env) {
+  return (await getSetting(env, MSG_TEMPLATE_KEY)) || DEFAULT_MSG_TEMPLATE;
+}
+
+// 占位符替换 + 排版清理：去掉行尾空白、压缩 3+ 连续空行、去首尾空行
+export function renderMessage(tpl, { title, body }) {
+  const s = String(tpl || DEFAULT_MSG_TEMPLATE)
+    .replaceAll('{title}', String(title ?? ''))
+    .replaceAll('{body}', String(body ?? ''))
+    .replaceAll('{time}', formatTime());
+  return s
+    .split('\n')
+    .map((l) => l.replace(/[ \t]+$/, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /* ---------------- 发送 ---------------- */
@@ -262,7 +299,11 @@ const mask = (s) => (!s ? '' : s.length <= 8 ? '****' : s.slice(0, 4) + '****' +
 // GET /api/qq/config —— 当前配置视图（secret/openid 只回掩码，不回明文）
 export async function getBotConfigView(request, env, userId) {
   const cfg = await resolveBotConfig(env);
-  const [groupOpenid, userOpenid] = await Promise.all([getOpenid(env, 'group'), getOpenid(env, 'c2c')]);
+  const [groupOpenid, userOpenid, msgTemplate] = await Promise.all([
+    getOpenid(env, 'group'),
+    getOpenid(env, 'c2c'),
+    getMessageTemplate(env),
+  ]);
   return json({
     app_id: cfg.appId,
     has_secret: !!cfg.appSecret,
@@ -270,6 +311,7 @@ export async function getBotConfigView(request, env, userId) {
     target: cfg.target,
     group_openid: groupOpenid || '',
     user_openid: userOpenid || '',
+    msg_template: msgTemplate,
   });
 }
 
@@ -293,6 +335,12 @@ export async function updateBotConfig(request, env, userId) {
       return json({ error: 'target 必须是 group / c2c / both' }, 400);
     }
     await setSetting(env, 'qq_target', normalizeTarget(b.target));
+  }
+  // 消息模板：空串 = 恢复默认模板（删掉 Web 存的值）
+  if (b.msg_template !== undefined) {
+    const v = String(b.msg_template);
+    if (v.trim()) await setSetting(env, MSG_TEMPLATE_KEY, v.slice(0, 1000));
+    else await delSetting(env, MSG_TEMPLATE_KEY);
   }
   return json({ ok: true });
 }

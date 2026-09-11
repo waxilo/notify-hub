@@ -112,7 +112,9 @@ ck('tick 触发 1 个', r.scanned === 1 && r.fired === 1, JSON.stringify(r));
 let n = db.prepare('SELECT COUNT(*) c FROM notifications').get();
 ck('产生 1 条通知', n.c === 1, 'count=' + n.c);
 ck('调用 QQ 群消息接口', qqCalls.length === 1, JSON.stringify(qqCalls[0] || {}));
-ck('QQ 消息标题取任务名称', qqCalls[0].text === '任务\n任务', JSON.stringify(qqCalls[0].text));
+ck('QQ 消息标题取任务名称（默认模板）',
+  qqCalls[0].text.startsWith('📢 任务\n━━━━━━━━━━━━━━\n任务\n\n🕐 '),
+  JSON.stringify(qqCalls[0].text));
 ck('QQ 消息为文本类型', qqCalls[0].msg_type === 0, JSON.stringify(qqCalls[0].msg_type));
 ck('通知不挂 key_id', db.prepare('SELECT key_id FROM notifications').get().key_id === null);
 // 通知归到任务名下：任务列表能统计「已发送 N 条」，也能按任务查历史

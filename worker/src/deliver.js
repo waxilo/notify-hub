@@ -5,7 +5,7 @@
 //   消息**先入库再推送** —— QQ 网关失败/未配置时通知不丢，历史里显示「未送达」；
 //   推送成功才写 delivered_at（历史里显示「已送达」）。
 import { json } from './utils.js';
-import { resolveBotConfig, targetKinds, sendGroupMessage, sendC2CMessage } from './qq.js';
+import { resolveBotConfig, targetKinds, sendGroupMessage, sendC2CMessage, getMessageTemplate, renderMessage } from './qq.js';
 
 const DEDUP_WINDOW_MS = 300_000;   // 5 分钟防重窗口
 
@@ -59,7 +59,7 @@ export async function deliver(env, opts) {
   let qqSent = false;
   try {
     const cfg = await resolveBotConfig(env);
-    const text = t + '\n' + b;
+    const text = renderMessage(await getMessageTemplate(env), { title: t, body: b });
     for (const kind of targetKinds(cfg.target)) {
       try {
         if (kind === 'group') await sendGroupMessage(env, cfg, text);
