@@ -73,5 +73,6 @@ export const api = {
   // QQ 机器人配置：secret/openid 服务端只回掩码；app_secret 留空 = 保持不变
   getQQConfig: () => req('/qq/config'),
   updateQQConfig: (body) => req('/qq/config', 'PUT', body),
+  unbindQQ: (kind, openid) => req('/qq/config', 'PUT', { unbind_kind: kind, unbind_openid: openid }),
   testQQ: () => req('/qq/test', 'POST', {}),
 };

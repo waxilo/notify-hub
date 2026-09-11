@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
 import { API_BASE } from './config.js?v=20260911c';
-import { api, setToken, isLoggedIn } from './api.js?v=20260911i';
+import { api, setToken, isLoggedIn } from './api.js?v=20260911j';
 
 
 const $ = (sel) => document.querySelector(sel);
@@ -107,6 +107,13 @@ function switchTab(tabId, viewId) {
 
 const QQ_TARGET_LABEL = { group: 'QQ 群', c2c: 'QQ 私聊', both: '群 + 私聊都发' };
 
+// 名单渲染：有绑定显示 chip（code + 移除按钮），无绑定显示引导文案
+const bindList = (items, kind, emptyText) => (items || []).length
+  ? (items || []).map((o) =>
+      `<span class="bind-chip"><code>${escapeHtml(o)}</code><button type="button" class="unbind" data-kind="${kind}" data-openid="${escapeHtml(o)}" title="从推送名单移除">×</button></span>`
+    ).join(' ')
+  : `<b class="warn">未绑定</b> —— ${emptyText}`;
+
 async function renderQQBot() {
   const view = $('#view-qqbot');
   view.innerHTML = '<div class="card"><p class="hint">加载中…</p></div>';
@@ -144,12 +151,25 @@ async function renderQQBot() {
       </form>
     </div>
     <div class="card">
-      <h2>绑定状态（openid 自动捕获）</h2>
-      <p class="hint">QQ 群：${c.group_openid ? `<code>${escapeHtml(c.group_openid)}</code>（已绑定）` : '<b class="warn">未绑定</b> —— 把机器人拉进群，在群里 @它 说句话'}</p>
-      <p class="hint">QQ 私聊：${c.user_openid ? `<code>${escapeHtml(c.user_openid)}</code>（已绑定）` : '<b class="warn">未绑定</b> —— 加机器人为好友，私聊它发一句话'}</p>
-      <p class="hint xs">openid 在机器人<b>收到第一条对应消息</b>时自动捕获入库（事件走 Webhook 推送）。换群 / 换好友绑定：重新触发一次对应事件即自动更新。</p>
+      <h2>推送名单（openid 自动捕获，多群 / 多好友扇出）</h2>
+      <p class="hint">QQ 群：${bindList(c.group_openids, 'group', '把机器人拉进群，在群里 @它 说句话')}</p>
+      <p class="hint">QQ 私聊：${bindList(c.user_openids, 'c2c', '加机器人为好友，私聊它发一句话')}</p>
+      <p class="hint xs">每个私聊过机器人 / @过机器人的目标都会<b>自动加入名单</b>（不覆盖已有绑定），推送时逐个发送、人人都能收到。不需要接收的点击 × 移除即可。</p>
       <p class="hint xs">开放平台管理端需已切换为 <b>WebHook 模式</b>，回调地址填：<code>${escapeHtml(API_BASE)}/api/qq/callback</code>（URL 验证按官方算法自动完成）。</p>
     </div>`;
+
+  view.querySelectorAll('button.unbind').forEach((btn) => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        await api.unbindQQ(btn.dataset.kind, btn.dataset.openid);
+        renderQQBot();
+      } catch (err) {
+        btn.disabled = false;
+        alert('移除失败：' + err.message);
+      }
+    };
+  });
 
   const form = $('#qq-form');
   form.onsubmit = async (e) => {

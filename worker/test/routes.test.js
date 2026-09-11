@@ -14,13 +14,26 @@ const ck = (name, cond, extra) => {
   if (!cond) { bad++; console.log('FAIL ', name, extra ?? ''); } else console.log('ok   ', name, extra ?? '');
 };
 
-// 记录所有绑定调用（openid 捕获落库断言用），其余行为与纯 stub 一致
+// 记录所有绑定调用（openid 捕获落库断言用）；
+// settings 表用内存 Map 模拟读写，让「捕获追加不覆盖」这类多步逻辑能读到上一次写入
 const dbCalls = [];
+const settingsStore = new Map();
 const DB = {
   prepare: (sql) => ({
     bind: (...args) => {
       dbCalls.push({ sql, args });
-      return { all: async () => ({ results: [] }), first: async () => null, run: async () => ({ meta: {} }) };
+      const isSettingsRead = /FROM settings/i.test(sql);
+      const isSettingsUpsert = /INSERT INTO settings/i.test(sql) && /ON CONFLICT/i.test(sql);
+      const isSettingsDelete = /DELETE FROM settings/i.test(sql);
+      return {
+        all: async () => ({ results: [] }),
+        first: async () => (isSettingsRead ? { v: settingsStore.get(args[0]) ?? null } : null),
+        run: async () => {
+          if (isSettingsUpsert) settingsStore.set(args[0], args[1]);
+          else if (isSettingsDelete) settingsStore.delete(args[0]);
+          return { meta: {} };
+        },
+      };
     },
   }),
 };
@@ -147,13 +160,24 @@ const signedPost = async (payload) => {
 
 const c2cEv = await signedPost({ op: 0, t: 'C2C_MESSAGE_CREATE', d: { user_openid: 'USER_ABC', content: '绑定', id: 'evt-c2c' } });
 ck('C2C 事件验签通过', c2cEv.status === 200, `status=${c2cEv.status} body=${c2cEv.body.slice(0, 60)}`);
-const c2cWrite = dbCalls.find((c) => c.sql.includes('INSERT INTO settings') && c.args[0] === 'qq_user_openid');
-ck('C2C 事件自动捕获 user_openid 落库', !!c2cWrite && c2cWrite.args[1] === 'USER_ABC', JSON.stringify(c2cWrite && c2cWrite.args));
+const c2cWrite = dbCalls.find((c) => c.sql.includes('INSERT INTO settings') && c.args[0] === 'qq_user_openids');
+ck('C2C 事件自动捕获 user_openid 进名单', !!c2cWrite && c2cWrite.args[1] === '["USER_ABC"]', JSON.stringify(c2cWrite && c2cWrite.args));
 
 const grpEv = await signedPost({ op: 0, t: 'GROUP_AT_MESSAGE_CREATE', d: { group_openid: 'GROUP_ABC', content: '@机器人', id: 'evt-grp' } });
 ck('群事件验签通过', grpEv.status === 200, `status=${grpEv.status}`);
-const grpWrite = dbCalls.find((c) => c.sql.includes('INSERT INTO settings') && c.args[0] === 'qq_group_openid');
-ck('群事件自动捕获 group_openid 落库', !!grpWrite && grpWrite.args[1] === 'GROUP_ABC', JSON.stringify(grpWrite && grpWrite.args));
+const grpWrite = dbCalls.find((c) => c.sql.includes('INSERT INTO settings') && c.args[0] === 'qq_group_openids');
+ck('群事件自动捕获 group_openid 进名单', !!grpWrite && grpWrite.args[1] === '["GROUP_ABC"]', JSON.stringify(grpWrite && grpWrite.args));
+
+// 多好友扇出：第二个好友触发捕获应追加而非覆盖，名单变两条
+const c2cEv2 = await signedPost({ op: 0, t: 'C2C_MESSAGE_CREATE', d: { author: { user_openid: 'USER_DEF' }, content: '第二个人', id: 'evt-c2c2' } });
+ck('第二个好友事件验签通过', c2cEv2.status === 200, `status=${c2cEv2.status}`);
+const c2cWrite2 = dbCalls.filter((c) => c.sql.includes('INSERT INTO settings') && c.args[0] === 'qq_user_openids').pop();
+ck('第二个好友追加进名单（不覆盖）', !!c2cWrite2 && c2cWrite2.args[1] === '["USER_ABC","USER_DEF"]', JSON.stringify(c2cWrite2 && c2cWrite2.args));
+// 重复捕获同一好友不产生新的写库
+const beforeDup = dbCalls.filter((c) => c.sql.includes('INSERT INTO settings') && c.args[0] === 'qq_user_openids').length;
+await signedPost({ op: 0, t: 'C2C_MESSAGE_CREATE', d: { author: { user_openid: 'USER_DEF' }, content: '再说一句', id: 'evt-c2c3' } });
+const afterDup = dbCalls.filter((c) => c.sql.includes('INSERT INTO settings') && c.args[0] === 'qq_user_openids').length;
+ck('重复好友不重复写库', beforeDup === afterDup, `before=${beforeDup} after=${afterDup}`);
 
 // 内容被篡改（签名对不上实际 body）必须 401
 const tsT = '1700000000';

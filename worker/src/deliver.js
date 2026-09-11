@@ -5,7 +5,7 @@
 //   消息**先入库再推送** —— QQ 网关失败/未配置时通知不丢，历史里显示「未送达」；
 //   推送成功才写 delivered_at（历史里显示「已送达」）。
 import { json } from './utils.js';
-import { resolveBotConfig, targetKinds, sendGroupMessage, sendC2CMessage, getMessageTemplate, renderMessage } from './qq.js';
+import { resolveBotConfig, targetKinds, getOpenids, sendToOpenid, getMessageTemplate, renderMessage } from './qq.js';
 
 const DEDUP_WINDOW_MS = 300_000;   // 5 分钟防重窗口
 
@@ -54,19 +54,30 @@ export async function deliver(env, opts) {
   if (!b.trim()) return { id, empty: true };
 
   // QQ 推送：目标由 QQ_TARGET 决定（group / c2c / both），凭证从 Web 配置/env 解析。
-  // 至少一个目标送达即写 delivered_at；单目标失败只记日志，不影响入库与接口响应，
-  // 未捕获 openid 的目标视为未配置（抛错走同一隔离路径）。
+  // 每类目标按 openid 名单扇出（多个群 / 多个好友都收到）；单目标失败只记日志，
+  // 至少一个目标送达即写 delivered_at；名单为空视为未绑定（走同一隔离路径）。
   let qqSent = false;
   try {
     const cfg = await resolveBotConfig(env);
     const text = renderMessage(await getMessageTemplate(env), { title: t, body: b });
     for (const kind of targetKinds(cfg.target)) {
-      try {
-        if (kind === 'group') await sendGroupMessage(env, cfg, text);
-        else await sendC2CMessage(env, cfg, text);
-        qqSent = true;
-      } catch (err) {
-        console.error('deliver_qq_error', JSON.stringify({ id, target: kind, err: String(err).slice(0, 300) }));
+      const openids = await getOpenids(env, kind);
+      if (!openids.length) {
+        console.error('deliver_qq_error', JSON.stringify({
+          id, target: kind,
+          err: kind === 'group'
+            ? 'qq 群未绑定：把机器人拉进群并 @它 发一条消息即自动加入名单'
+            : 'qq 私聊未绑定：加机器人为好友并私聊它发一条消息即自动加入名单',
+        }));
+        continue;
+      }
+      for (const openid of openids) {
+        try {
+          await sendToOpenid(env, cfg, kind, openid, text);
+          qqSent = true;
+        } catch (err) {
+          console.error('deliver_qq_error', JSON.stringify({ id, target: kind, to: openid, err: String(err).slice(0, 300) }));
+        }
       }
     }
   } catch (err) {

@@ -13,11 +13,11 @@
 // 配置来源（Web 控制台可改，保存即生效、无需重新部署）：
 //   AppID/AppSecret/触达目标 → settings 表（qq_app_id / qq_app_secret / qq_target）优先，
 //   env（QQ_APP_ID / QQ_APP_SECRET / QQ_TARGET，wrangler secret/vars）兜底。
-//   openid 相反：env 显式钉死优先（沙箱/多群场景），否则用回调自动捕获的存库值。
+//   openid 相反：env 显式钉死优先（沙箱场景），否则用回调自动捕获的名单（多群/多好友，推送扇出）。
 //
 // openid 官方不提供查询接口，只能从事件里拿（回调 URL 配到本服务的 /api/qq/callback）：
-//   群绑定：在群里 @机器人 说一句话 → GROUP_AT_MESSAGE_CREATE 自动存 qq_group_openid
-//   私聊绑定：私聊机器人发一句话     → C2C_MESSAGE_CREATE 自动存 qq_user_openid
+//   群绑定：在群里 @机器人 说一句话 → GROUP_AT_MESSAGE_CREATE 自动进名单（多群累积）
+//   私聊绑定：私聊机器人发一句话     → C2C_MESSAGE_CREATE 自动进名单（多好友累积）
 //
 // 回调安全：QQ 平台对每个事件用 Ed25519 签名（X-Signature-Ed25519，seed = AppSecret 重复填充至 32 字节），
 // 这里用 tweetnacl 派生公钥验签；URL 验证（op=13）按官方要求返回 {plain_token, signature}。
@@ -26,8 +26,10 @@ import { json } from './utils.js';
 
 const TOKEN_API = 'https://bots.qq.com/app/getAppAccessToken';
 const API_BASE = 'https://api.sgroup.qq.com';
-const GROUP_OPENID_KEY = 'qq_group_openid';
+const GROUP_OPENID_KEY = 'qq_group_openid';       // 旧单值键（只保留最后一个），读取时兼容迁移
 const USER_OPENID_KEY = 'qq_user_openid';
+const GROUP_OPENIDS_KEY = 'qq_group_openids';     // 新多值键：JSON 数组，支持多个群 / 多个好友
+const USER_OPENIDS_KEY = 'qq_user_openids';
 const MSG_TEMPLATE_KEY = 'qq_msg_template';
 const VALID_TARGETS = ['group', 'c2c', 'both'];
 
@@ -89,11 +91,39 @@ export function targetKinds(target) {
   return ['group'];
 }
 
-// openid：env 显式配置优先（沙箱/多群/固定好友场景可钉死），否则用回调自动捕获的
-export async function getOpenid(env, kind) {
+// openid 名单：env 显式配置优先（沙箱场景钉死唯一目标），否则用回调自动捕获的名单（多群/多好友扇出）。
+// 存储为 JSON 数组（qq_group_openids / qq_user_openids）；旧单值键（qq_*_openid）在无数组键时兜底读取 ——
+// 首次捕获新目标写入数组键即完成迁移，旧值不丢。
+export async function getOpenids(env, kind) {
   const envKey = kind === 'group' ? 'QQ_GROUP_OPENID' : 'QQ_USER_OPENID';
-  if (env[envKey]) return env[envKey];
-  return getSetting(env, kind === 'group' ? GROUP_OPENID_KEY : USER_OPENID_KEY);
+  if (env[envKey]) return [env[envKey]];
+  const arrKey = kind === 'group' ? GROUP_OPENIDS_KEY : USER_OPENIDS_KEY;
+  const legacyKey = kind === 'group' ? GROUP_OPENID_KEY : USER_OPENID_KEY;
+  const raw = await getSetting(env, arrKey);
+  if (raw) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return arr.filter(Boolean);
+    } catch { /* 名单损坏时回落旧单值 */ }
+  }
+  const legacy = await getSetting(env, legacyKey);
+  return legacy ? [legacy] : [];
+}
+
+// 捕获到新的群/好友 openid：加入名单（已存在则跳过，不产生写放大）
+export async function addOpenid(env, kind, openid) {
+  if (!openid) return;
+  const list = await getOpenids(env, kind);
+  if (list.includes(openid)) return;
+  await setSetting(env, kind === 'group' ? GROUP_OPENIDS_KEY : USER_OPENIDS_KEY, JSON.stringify([...list, openid]));
+}
+
+// Web 控制台手动移除某个目标（好友删了 / 群退了 / 不想让它再收通知）
+export async function removeOpenid(env, kind, openid) {
+  const list = (await getOpenids(env, kind)).filter((o) => o !== openid);
+  await setSetting(env, kind === 'group' ? GROUP_OPENIDS_KEY : USER_OPENIDS_KEY, JSON.stringify(list));
+  const legacyKey = kind === 'group' ? GROUP_OPENID_KEY : USER_OPENID_KEY;
+  if ((await getSetting(env, legacyKey)) === openid) await delSetting(env, legacyKey);
 }
 
 /* ---------------- 消息模板 ---------------- */
@@ -146,8 +176,9 @@ export async function getAccessToken(env, cfg, force = false) {
   return tokenCache.token;
 }
 
-// text：title 与 body 已由调用方拼好。返回 true；任何失败向上抛（由 deliver 隔离）。
-async function postMessage(env, cfg, kind, openid, text) {
+// 向单个 openid 发文本消息（msg_type=0，正文由调用方按模板渲染好）。
+// 返回 true；任何失败向上抛（由 deliver 逐目标隔离）。
+export async function sendToOpenid(env, cfg, kind, openid, text) {
   const token = await getAccessToken(env, cfg);
   const path = kind === 'group' ? 'groups' : 'users';
   const res = await fetch(`${API_BASE}/v2/${path}/${encodeURIComponent(openid)}/messages`, {
@@ -161,22 +192,6 @@ async function postMessage(env, cfg, kind, openid, text) {
     throw new Error(`qq_send_failed ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
   }
   return true;
-}
-
-export async function sendGroupMessage(env, cfg, text) {
-  const openid = await getOpenid(env, 'group');
-  if (!openid) {
-    throw new Error('qq_group_openid 未配置：在 QQ 群里 @机器人 发一条消息即可自动绑定');
-  }
-  return postMessage(env, cfg, 'group', openid, text);
-}
-
-export async function sendC2CMessage(env, cfg, text) {
-  const openid = await getOpenid(env, 'c2c');
-  if (!openid) {
-    throw new Error('qq_user_openid 未配置：先加机器人为好友，再私聊它发一条消息即可自动绑定');
-  }
-  return postMessage(env, cfg, 'c2c', openid, text);
 }
 
 /* ---------------- 回调（/api/qq/callback） ---------------- */
@@ -273,20 +288,14 @@ export async function handleCallback(request, env, ctx) {
   logProbe({ sig_ok: true });
 
   if (payload.t === 'GROUP_AT_MESSAGE_CREATE' && payload.d && payload.d.group_openid) {
-    const prev = await getSetting(env, GROUP_OPENID_KEY);
-    if (prev !== payload.d.group_openid) {
-      await setSetting(env, GROUP_OPENID_KEY, payload.d.group_openid);
-    }
+    // 多群扇出：每个触发过事件的群都进名单（不覆盖已有绑定）
+    await addOpenid(env, 'group', payload.d.group_openid);
   }
   if (payload.t === 'C2C_MESSAGE_CREATE' && payload.d) {
+    // 多好友扇出：每个私聊过机器人的用户都进名单。
     // 实测事件里 openid 在 d.author.user_openid（d.user_openid 不存在，两种路径都兼容）
     const oid = (payload.d.author && payload.d.author.user_openid) || payload.d.user_openid;
-    if (oid) {
-      const prev = await getSetting(env, USER_OPENID_KEY);
-      if (prev !== oid) {
-        await setSetting(env, USER_OPENID_KEY, oid);
-      }
-    }
+    if (oid) await addOpenid(env, 'c2c', oid);
   }
   // 官方 op 12 = HTTP Callback ACK：告知平台已收到推送（对齐 AstrBot/官方协议）
   return json({ opcode: 12 });
@@ -299,9 +308,9 @@ const mask = (s) => (!s ? '' : s.length <= 8 ? '****' : s.slice(0, 4) + '****' +
 // GET /api/qq/config —— 当前配置视图（secret/openid 只回掩码，不回明文）
 export async function getBotConfigView(request, env, userId) {
   const cfg = await resolveBotConfig(env);
-  const [groupOpenid, userOpenid, msgTemplate] = await Promise.all([
-    getOpenid(env, 'group'),
-    getOpenid(env, 'c2c'),
+  const [groupOpenids, userOpenids, msgTemplate] = await Promise.all([
+    getOpenids(env, 'group'),
+    getOpenids(env, 'c2c'),
     getMessageTemplate(env),
   ]);
   return json({
@@ -309,8 +318,8 @@ export async function getBotConfigView(request, env, userId) {
     has_secret: !!cfg.appSecret,
     secret_masked: mask(cfg.appSecret),
     target: cfg.target,
-    group_openid: groupOpenid || '',
-    user_openid: userOpenid || '',
+    group_openids: groupOpenids,
+    user_openids: userOpenids,
     msg_template: msgTemplate,
   });
 }
@@ -341,6 +350,12 @@ export async function updateBotConfig(request, env, userId) {
     const v = String(b.msg_template);
     if (v.trim()) await setSetting(env, MSG_TEMPLATE_KEY, v.slice(0, 1000));
     else await delSetting(env, MSG_TEMPLATE_KEY);
+  }
+  // 从推送名单移除某个目标（unbind_kind: group|c2c + unbind_openid）
+  if (b.unbind_kind !== undefined && b.unbind_openid !== undefined) {
+    const kind = String(b.unbind_kind);
+    if (kind !== 'group' && kind !== 'c2c') return json({ error: 'unbind_kind 必须是 group / c2c' }, 400);
+    await removeOpenid(env, kind, String(b.unbind_openid));
   }
   return json({ ok: true });
 }

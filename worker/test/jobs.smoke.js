@@ -381,6 +381,19 @@ ck('settings 凭证优先于 env', hr.status === 201 && qqTokenCalls.length === 
 ck('settings 凭证下消息照常投递', qqCalls[qqCalls.length - 1].kind === 'groups', JSON.stringify(qqCalls[qqCalls.length - 1] || {}));
 db.prepare("DELETE FROM settings WHERE k IN ('qq_app_id', 'qq_app_secret')").run();
 
+// 17g) 多好友扇出：名单里两个 openid 都收到（多个用户加好友 = 人人都收通知）
+const envC2CFan = { ...env, QQ_TARGET: 'c2c' };
+db.prepare("INSERT INTO settings (k, v) VALUES ('qq_user_openids', '[\"USER_A\",\"USER_B\"]') ON CONFLICT(k) DO UPDATE SET v=excluded.v").run();
+q0 = qqCalls.length;
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('多好友扇出'), { method: 'GET' }), envC2CFan, 'k3');
+ck('多好友名单逐个扇出', hr.status === 201 && qqCalls.length === q0 + 2
+  && qqCalls[q0].kind === 'users' && qqCalls[q0].to === 'USER_A'
+  && qqCalls[q0 + 1].kind === 'users' && qqCalls[q0 + 1].to === 'USER_B',
+  JSON.stringify(qqCalls.slice(q0)));
+ck('扇出任一送达即写 delivered_at',
+  db.prepare('SELECT delivered_at FROM notifications WHERE body=?').get('多好友扇出').delivered_at !== null);
+db.prepare("DELETE FROM settings WHERE k='qq_user_openids'").run();
+
 /* ---------------- createJob / updateJob 的写入路径 ---------------- */
 
 // 18) 这两条曾经出问题：updateJob 的 SQL 加了占位符却忘了定义对应变量（线上 500），
