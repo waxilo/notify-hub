@@ -2,14 +2,10 @@
 import { json } from './utils.js';
 import { register, login, changePassword, verifyJWT } from './auth.js';
 import { createKey, listKeys, updateKey, deleteKey } from './keys.js';
-import { listNotifications, getNotification, markRead, markDelivered, deleteNotification, clearNotifications } from './notifications.js';
+import { listNotifications, getNotification, markRead, deleteNotification, clearNotifications } from './notifications.js';
 import { handleWebhook } from './webhook.js';
-import { PushHub } from './push.js';
-import { appLatest, appDownload } from './appupdate.js';
+import { handleCallback } from './qq.js';
 import { listJobs, createJob, updateJob, deleteJob, runDueJobs } from './jobs.js';
-
-// Durable Object 类必须从主入口导出
-export { PushHub };
 
 async function getUserId(request, env) {
   const auth = request.headers.get('Authorization') || '';
@@ -44,25 +40,13 @@ export default {
       return handleWebhook(request, env, m[1]);
     }
 
-    // ---- WebSocket 实时推送（JWT 鉴权，token 走 query 或 Authorization）----
-    if (pathname === '/ws' && request.method === 'GET') {
-      const url = new URL(request.url);
-      const auth = request.headers.get('Authorization') || '';
-      const token = url.searchParams.get('token')
-        || (auth.startsWith('Bearer ') ? auth.slice(7) : '');
-      if (!token) return json({ error: 'missing token' }, 401);
-      const payload = await verifyJWT(token, env.JWT_SECRET);
-      if (!payload) return json({ error: 'unauthorized' }, 401);
-      const id = env.PUSH_HUB.idFromName(payload.sub);
-      return env.PUSH_HUB.get(id).fetch(new Request('https://do/connect', request));
-    }
-
     if (pathname.startsWith('/api/')) {
       const p = pathname.replace('/api', '');
 
-      // App 版本检查与 APK 下载（公开接口，私有仓库经 GITHUB_TOKEN 代理）
-      if (p === '/app/latest' && request.method === 'GET') return appLatest(env);
-      if (p === '/app/download' && request.method === 'GET') return appDownload(env);
+      // QQ 官方机器人回调（公开路由，Ed25519 验签；配置在开放平台管理端）
+      if (p === '/qq/callback' && request.method === 'POST') {
+        return handleCallback(request, env);
+      }
 
       // 账号
       if (p === '/register' && request.method === 'POST') return register(request, env);
@@ -107,20 +91,6 @@ export default {
         const uid = await getUserId(request, env);
         const e = requireAuth(uid); if (e) return e;
         return clearNotifications(request, env, uid);
-      }
-      if (p.startsWith('/notifications/') && p.endsWith('/delivered') && request.method === 'POST') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        const r = await markDelivered(request, env, uid, p.split('/')[2]);
-        // 通知 DO 取消该消息的重推任务
-        try {
-          const stub = env.PUSH_HUB.get(env.PUSH_HUB.idFromName(String(uid)));
-          await stub.fetch('https://do/delivered', {
-            method: 'POST',
-            body: JSON.stringify({ id: Number(p.split('/')[2]) }),
-          });
-        } catch { /* ignore */ }
-        return r;
       }
       if (p.startsWith('/notifications/') && p.endsWith('/read') && request.method === 'POST') {
         const uid = await getUserId(request, env);

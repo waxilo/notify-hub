@@ -1,4 +1,4 @@
-// key 管理：生成 / 列表 / 编辑（名称、状态、模式、强力震动）/ 吊销
+// key 管理：生成 / 列表 / 编辑（名称、状态、模式）/ 吊销
 import { json, readJson } from './utils.js';
 
 function genKey() {
@@ -12,27 +12,25 @@ export async function createKey(request, env, userId) {
   const body = await readJson(request);
   const name = String(body.name || 'default').slice(0, 64);
   const key = genKey();
-  // strong_vibrate 默认 0（与迁移默认一致，显式写更清晰）：需要强震的 key 单独在编辑里打开
   const res = await env.DB.prepare(
-    'INSERT INTO keys (user_id, key, name, created_at, active, mode, strong_vibrate) VALUES (?,?,?,?,1,?,?)'
+    'INSERT INTO keys (user_id, key, name, created_at, active, mode) VALUES (?,?,?,?,1,?)'
   ).bind(
     userId, key, name, Date.now(),
     String(body.mode || 'default') === 'custom' ? 'custom' : 'default',
-    body.strong_vibrate ? 1 : 0,
   ).run();
   return json({ id: res.meta.last_row_id, key, name, createdAt: Date.now() }, 201);
 }
 
 export async function listKeys(request, env, userId) {
   const rows = await env.DB.prepare(
-    'SELECT id, name, key, created_at, last_used, active, mode, template, strong_vibrate FROM keys WHERE user_id = ? ORDER BY id DESC'
+    'SELECT id, name, key, created_at, last_used, active, mode, template FROM keys WHERE user_id = ? ORDER BY id DESC'
   ).bind(userId).all();
   // key 明文返回（自托管场景无需隐藏），Web 端可随时查看/复制
   const keys = (rows.results || []).map((r) => ({ ...r, keyFull: r.key }));
   return json({ keys });
 }
 
-// 编辑 key：名称 / 启停 / 模式 / 强力震动（启用中改名为合法字符串即可）
+// 编辑 key：名称 / 启停 / 模式（启用中改名为合法字符串即可）
 export async function updateKey(request, env, userId, id) {
   const body = await readJson(request);
   const sets = [];
@@ -49,10 +47,7 @@ export async function updateKey(request, env, userId, id) {
   if (typeof body.template === 'string') {
     sets.push('template=?'); vals.push(body.template.slice(0, 2000));
   }
-  // 字段不传就不改：旧版 App / 前端的局部更新不会误清这个开关
-  if (body.strong_vibrate !== undefined) {
-    sets.push('strong_vibrate=?'); vals.push(body.strong_vibrate ? 1 : 0);
-  }
+  // 废弃字段（如旧客户端传来的 strong_vibrate）直接忽略：只认上面列出的字段，不报错
   if (!sets.length) return json({ error: 'nothing to update' }, 400);
   vals.push(id, userId);
   const res = await env.DB.prepare(
