@@ -3,7 +3,7 @@
 //      / 与外部 key 解耦（通知不带 key、标题取任务名称）
 //      / 通知归到 job_id（可查历史、可按 job 或按 key 清空、删任务/删 key 连带清历史）
 //      / 停用 key 的调用留痕（rejected=key_disabled，只入库不推送、窗口内不刷屏）
-//      / QQ 官方机器人触达（触发即发群消息；网关失败不影响入库）
+//      / QQ 官方机器人触达（触发即发群/私聊消息，目标由 QQ_TARGET 决定；网关失败不影响入库）
 // 运行：cd worker && node test/jobs.smoke.js
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
@@ -38,7 +38,8 @@ global.fetch = async (url, init) => {
   if (u.includes('api.sgroup.qq.com')) {
     if (qqSendFail) return new Response(JSON.stringify({ result: -1, errmsg: 'mocked failure' }), { status: 200 });
     const body = JSON.parse(init.body);
-    qqCalls.push({ to: u.match(/groups\/([^/]+)\//)[1], text: body.content, msg_type: body.msg_type });
+    const m = u.match(/\/v2\/(groups|users)\/([^/]+)\//);   // 群与私聊共用 api.sgroup.qq.com
+    qqCalls.push({ kind: m[1], to: m[2], text: body.content, msg_type: body.msg_type });
     return new Response(JSON.stringify({ result: 0, msg_seq: 1 }), { status: 200 });
   }
   return _origFetch ? _origFetch(url, init) : new Response('{}', { status: 404 });
@@ -318,6 +319,53 @@ hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURICom
 ck('未配置群 openid 时仍返回 201', hr.status === 201, 'status=' + hr.status);
 ck('未配置群 openid 时不调 QQ', qqCalls.length === qqBefore4, 'qq=' + (qqCalls.length - qqBefore4));
 ck('未配置群 openid 时通知仍入库', countAll() === notifBefore4 + 1, 'c=' + countAll());
+
+/* ---------------- 触达目标（QQ_TARGET：group / c2c / both） ---------------- */
+
+const lastCall = () => qqCalls[qqCalls.length - 1];
+// 模拟「私聊机器人一句话」后的自动捕获结果
+db.prepare("INSERT INTO settings (k, v) VALUES ('qq_user_openid', 'USER_OPENID_X') ON CONFLICT(k) DO UPDATE SET v=excluded.v").run();
+
+// 17a) 默认（未设 QQ_TARGET）只发群：私聊 openid 已在库也不发
+let q0 = qqCalls.length;
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('默认发群'), { method: 'GET' }), env, 'k3');
+ck('默认目标仍是群', hr.status === 201 && qqCalls.length === q0 + 1 && lastCall().kind === 'groups',
+  JSON.stringify(lastCall() || {}));
+
+// 17b) QQ_TARGET=c2c：只发私聊
+const envC2C = { ...env, QQ_TARGET: 'c2c' };
+q0 = qqCalls.length;
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('发私聊'), { method: 'GET' }), envC2C, 'k3');
+ck('QQ_TARGET=c2c 只发私聊', hr.status === 201 && qqCalls.length === q0 + 1
+  && lastCall().kind === 'users' && lastCall().to === 'USER_OPENID_X',
+  JSON.stringify(lastCall() || {}));
+ck('c2c 推送成功写 delivered_at',
+  db.prepare('SELECT delivered_at FROM notifications WHERE body=?').get('发私聊').delivered_at !== null);
+
+// 17c) QQ_TARGET=both：群 + 私聊各一条
+const envBoth = { ...env, QQ_TARGET: 'both' };
+q0 = qqCalls.length;
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('都发'), { method: 'GET' }), envBoth, 'k3');
+ck('QQ_TARGET=both 发两条', hr.status === 201 && qqCalls.length === q0 + 2, 'qq=' + (qqCalls.length - q0));
+ck('both 覆盖群与私聊', qqCalls.slice(q0).map((c) => c.kind).sort().join() === 'groups,users',
+  JSON.stringify(qqCalls.slice(q0).map((c) => c.kind)));
+
+// 17d) QQ_TARGET 非法值回落 group（不发私聊）
+const envBad = { ...env, QQ_TARGET: 'nonsense' };
+q0 = qqCalls.length;
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('非法目标'), { method: 'GET' }), envBad, 'k3');
+ck('非法 QQ_TARGET 回落 group', hr.status === 201 && qqCalls.length === q0 + 1 && lastCall().kind === 'groups',
+  JSON.stringify(lastCall() || {}));
+
+// 17e) QQ_TARGET=c2c 但私聊 openid 未捕获：只入库不推送（隔离语义与群一致）
+const envC2COnly = { ...env, QQ_TARGET: 'c2c', QQ_USER_OPENID: '' };
+db.prepare("DELETE FROM settings WHERE k='qq_user_openid'").run();
+const notifBeforeE = countAll();
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('没配私聊'), { method: 'GET' }), envC2COnly, 'k3');
+ck('未捕获私聊 openid 时仍返回 201', hr.status === 201, 'status=' + hr.status);
+ck('未捕获私聊 openid 时通知仍入库', countAll() === notifBeforeE + 1, 'c=' + countAll());
+ck('未捕获私聊 openid 时 delivered_at 为空',
+  db.prepare('SELECT delivered_at FROM notifications WHERE body=?').get('没配私聊').delivered_at === null);
 
 /* ---------------- createJob / updateJob 的写入路径 ---------------- */
 

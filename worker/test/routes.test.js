@@ -6,6 +6,7 @@
 // 所以这里用一张清单把「所有对外承诺的接口」钉住：少一条就红。
 //
 // 运行：cd worker && node test/routes.test.js
+import nacl from 'tweetnacl';
 import worker from '../src/index.js';
 
 let bad = 0;
@@ -13,9 +14,20 @@ const ck = (name, cond, extra) => {
   if (!cond) { bad++; console.log('FAIL ', name, extra ?? ''); } else console.log('ok   ', name, extra ?? '');
 };
 
+// 记录所有绑定调用（openid 捕获落库断言用），其余行为与纯 stub 一致
+const dbCalls = [];
+const DB = {
+  prepare: (sql) => ({
+    bind: (...args) => {
+      dbCalls.push({ sql, args });
+      return { all: async () => ({ results: [] }), first: async () => null, run: async () => ({ meta: {} }) };
+    },
+  }),
+};
+
 // 只需要 DB 存在（路由匹配后才会用到，未鉴权时先撞 401）
 const env = {
-  DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), first: async () => null, run: async () => ({ meta: {} }) }) }) },
+  DB,
   JWT_SECRET: 'test',
   QQ_APP_ID: 'TEST_APP_ID',
   QQ_APP_SECRET: 'TEST_APP_SECRET',
@@ -100,6 +112,49 @@ const noQQ = await worker.fetch(new Request('https://x/api/qq/callback', {
   method: 'POST', body: JSON.stringify({ op: 13 }),
 }), { DB: env.DB, JWT_SECRET: 'test' });
 ck('未配置 QQ 凭证返回 500', noQQ.status === 500, 'status=' + noQQ.status);
+
+console.log('\n---- QQ 回调自动捕获 openid（真实 Ed25519 签名）----');
+// verifySignature 要求 seed 恰好 32 字节，这里用等长的假 secret 派生真实密钥对
+const SECRET32 = 'TEST_APP_SECRET_0123456789abcdef';
+const signedEnv = { ...env, QQ_APP_SECRET: SECRET32 };
+const { secretKey } = nacl.sign.keyPair.fromSeed(new TextEncoder().encode(SECRET32));
+const signedPost = async (payload) => {
+  const raw = JSON.stringify(payload);
+  const ts = String(Math.floor(Date.now() / 1000));
+  const sig = nacl.sign.detached(new TextEncoder().encode(ts + raw), secretKey);
+  const sigHex = [...sig].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const r = await worker.fetch(new Request('https://x/api/qq/callback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Signature-Ed25519': sigHex, 'X-Signature-Timestamp': ts },
+    body: raw,
+  }), signedEnv);
+  return { status: r.status, body: await r.text() };
+};
+
+const c2cEv = await signedPost({ op: 0, t: 'C2C_MESSAGE_CREATE', d: { user_openid: 'USER_ABC', content: '绑定', id: 'evt-c2c' } });
+ck('C2C 事件验签通过', c2cEv.status === 200, `status=${c2cEv.status} body=${c2cEv.body.slice(0, 60)}`);
+const c2cWrite = dbCalls.find((c) => c.sql.includes('INSERT INTO settings') && c.args[0] === 'qq_user_openid');
+ck('C2C 事件自动捕获 user_openid 落库', !!c2cWrite && c2cWrite.args[1] === 'USER_ABC', JSON.stringify(c2cWrite && c2cWrite.args));
+
+const grpEv = await signedPost({ op: 0, t: 'GROUP_AT_MESSAGE_CREATE', d: { group_openid: 'GROUP_ABC', content: '@机器人', id: 'evt-grp' } });
+ck('群事件验签通过', grpEv.status === 200, `status=${grpEv.status}`);
+const grpWrite = dbCalls.find((c) => c.sql.includes('INSERT INTO settings') && c.args[0] === 'qq_group_openid');
+ck('群事件自动捕获 group_openid 落库', !!grpWrite && grpWrite.args[1] === 'GROUP_ABC', JSON.stringify(grpWrite && grpWrite.args));
+
+// 内容被篡改（签名对不上实际 body）必须 401
+const tsT = '1700000000';
+const rawT = JSON.stringify({ op: 0, t: 'C2C_MESSAGE_CREATE', d: { user_openid: 'EVIL' } });
+const sigT = nacl.sign.detached(new TextEncoder().encode(tsT + JSON.stringify({ op: 0, t: 'C2C_MESSAGE_CREATE', d: { user_openid: 'GOOD' } })), secretKey);
+const tamper = await worker.fetch(new Request('https://x/api/qq/callback', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Signature-Ed25519': [...sigT].map((b) => b.toString(16).padStart(2, '0')).join(''),
+    'X-Signature-Timestamp': tsT,
+  },
+  body: rawT,
+}), signedEnv);
+ck('篡改 body 的事件返回 401', tamper.status === 401, 'status=' + tamper.status);
 
 console.log(bad ? '\n' + bad + ' FAILED' : '\nALL PASS');
 process.exit(bad ? 1 : 0);
