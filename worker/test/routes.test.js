@@ -13,23 +13,16 @@ const ck = (name, cond, extra) => {
   if (!cond) { bad++; console.log('FAIL ', name, extra ?? ''); } else console.log('ok   ', name, extra ?? '');
 };
 
-// 只需要 DB/PUSH_HUB 存在（路由匹配后才会用到，未鉴权时先撞 401）
+// 只需要 DB 存在（路由匹配后才会用到，未鉴权时先撞 401）
 const env = {
   DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), first: async () => null, run: async () => ({ meta: {} }) }) }) },
-  PUSH_HUB: { idFromName: () => ({}), get: () => ({ fetch: async () => new Response('{}') }) },
   JWT_SECRET: 'test',
+  QQ_APP_ID: 'TEST_APP_ID',
+  QQ_APP_SECRET: 'TEST_APP_SECRET',
 };
 
-const hit = async (method, path) => {
-  const r = await worker.fetch(new Request('https://x' + path, { method }), env);
-  return r.status;
-};
-
-// 未鉴权时：已注册 = 401（或 400/403/404 等业务响应），未注册 = 404 + {"error":"not found"}
-// 注意 /api/notifications/:id 这类路由自己也可能返回 404，所以额外看响应体：
-// 未注册时 body 一定是 {"error":"not found"}，注册后由各自的 handler 决定。
-const hitBody = async (method, path) => {
-  const r = await worker.fetch(new Request('https://x' + path, { method }), env);
+const hitBody = async (method, path, opts = {}) => {
+  const r = await worker.fetch(new Request('https://x' + path, { method, ...opts }), env);
   return { status: r.status, body: await r.text() };
 };
 const isUnregistered = (r) => r.status === 404 && r.body.includes('"error":"not found"') && !r.body.includes('service');
@@ -39,8 +32,7 @@ const ROUTES = [
   ['POST', '/api/register', '注册'],
   ['POST', '/api/login', '登录'],
   ['POST', '/api/password', '修改密码'],
-  ['GET', '/api/app/latest', '版本检查（公开）'],
-  ['GET', '/api/app/download', 'APK 下载（公开）'],
+  ['POST', '/api/qq/callback', 'QQ 机器人回调（公开，验签）'],
   ['POST', '/api/keys', '新建 key'],
   ['GET', '/api/keys', '列出 key'],
   ['PUT', '/api/keys/1', '编辑 key（改名称/模式/模板/启停）'],
@@ -55,7 +47,6 @@ const ROUTES = [
   ['GET', '/api/notifications/1', '通知详情'],
   ['DELETE', '/api/notifications/1', '删除单条通知'],
   ['POST', '/api/notifications/1/read', '标记已读'],
-  ['POST', '/api/notifications/1/delivered', '标记已触达'],
   ['GET', '/api/jobs', '任务列表'],
   ['POST', '/api/jobs', '新建任务'],
   ['PUT', '/api/jobs/1', '编辑任务'],
@@ -71,9 +62,9 @@ for (const [method, path, label] of ROUTES) {
 }
 
 console.log('\n---- 反向对照：不存在的路径必须仍是 404 ----');
-for (const path of ['/api/nope', '/api/keys/1/nope', '/api/users']) {
+for (const path of ['/api/nope', '/api/keys/1/nope', '/api/users', '/api/app/latest', '/api/app/download', '/api/notifications/1/delivered']) {
   const r = await hitBody('GET', path);
-  ck(`未知路径 ${path} 返回 404`, isUnregistered(r), `status=${r.status} body=${r.body.slice(0, 60)}`);
+  ck(`已删/未知路径 ${path} 返回 404`, isUnregistered(r), `status=${r.status} body=${r.body.slice(0, 60)}`);
 }
 
 console.log('\n---- 清空接口必须拒绝无参数调用 ----');
@@ -83,6 +74,28 @@ ck('DELETE /api/notifications 无参数为 401（鉴权在前）', noParam.statu
 console.log('\n---- PUT /api/keys/:id 的实际行为（本次修复的主角）----');
 const putKey = await hitBody('PUT', '/api/keys/1');
 ck('PUT 无 body 未鉴权时返回 401 而非 404', putKey.status === 401, `status=${putKey.status} body=${putKey.body.slice(0, 80)}`);
+
+console.log('\n---- QQ 回调行为 ----');
+// url_validation（op=13）：官方要求在 5 秒内原样返回 AppSecret 明文
+const uv = await hitBody('POST', '/api/qq/callback', {
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ op: 13, d: {} }),
+});
+ck('url_validation 回显 AppSecret 明文', uv.status === 200 && uv.body === 'TEST_APP_SECRET',
+  `status=${uv.status} body=${uv.body.slice(0, 40)}`);
+
+// 伪造事件（无有效签名）必须拒绝
+const forged = await hitBody('POST', '/api/qq/callback', {
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ op: 0, t: 'GROUP_AT_MESSAGE_CREATE', d: { group_openid: 'EVIL' } }),
+});
+ck('无有效签名的事件返回 401', forged.status === 401, `status=${forged.status} body=${forged.body.slice(0, 40)}`);
+
+// 未配置 QQ 凭证时回调返回 500（明确提示，而非静默 404）
+const noQQ = await worker.fetch(new Request('https://x/api/qq/callback', {
+  method: 'POST', body: JSON.stringify({ op: 13 }),
+}), { DB: env.DB, JWT_SECRET: 'test' });
+ck('未配置 QQ 凭证返回 500', noQQ.status === 500, 'status=' + noQQ.status);
 
 console.log(bad ? '\n' + bad + ' FAILED' : '\nALL PASS');
 process.exit(bad ? 1 : 0);
