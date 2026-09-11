@@ -618,6 +618,7 @@ function openJobEdit(job) {
 
         <label class="check-row" style="margin-top:10px"><input type="checkbox" name="strong_vibrate" ${job && job.strong_vibrate ? 'checked' : ''}/> 强力震动（无声，持续震动到点击/滑掉通知，最长 30 秒）</label>
         <p class="hint xs" style="margin:4px 0 0">未开启时是普通横幅 + 单次震动。</p>
+        <label class="check-row" style="margin-top:8px"><input type="checkbox" name="skip_holiday" ${job && job.skip_holiday ? 'checked' : ''}/> 跳过节假日（当天为非工作日时不触发，仅周期型任务生效）</label>
 
         <details class="adv" ${needAdv ? 'open' : ''}>
           <summary>高级设置（启停）</summary>
@@ -720,6 +721,7 @@ function openJobEdit(job) {
       tz,
       enabled: F.enabled.checked,
       strong_vibrate: F.strong_vibrate.checked,
+      skip_holiday: F.skip_holiday.checked,
     };
     try {
       const r = isNew ? await api.createJob(payload) : await api.updateJob(job.id, payload);

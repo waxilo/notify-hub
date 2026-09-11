@@ -12,6 +12,22 @@ import { clearNotifications } from '../src/notifications.js';
 import { deleteKey, updateKey } from '../src/keys.js';
 import { handleWebhook } from '../src/webhook.js';
 
+// 节假日 API 仅在 skip_holiday 用例里被调用；此处 mock 掉，避免测试依赖外网。
+// 规则：2026-10-01 记为节假日（isHoliday=true），其余日期为工作日。非 holiday 请求走原始 fetch 兜底。
+const _origFetch = global.fetch;
+global.fetch = async (url, init) => {
+  if (String(url).includes('holidays/date/')) {
+    const m = String(url).match(/holidays\/date\/(\d{4}-\d{2}-\d{2})/);
+    const d = m ? m[1] : '';
+    const isHoliday = d === '2026-10-01';
+    return new Response(JSON.stringify({
+      code: 0, msg: 'success',
+      data: { date: d, isHoliday, isWorkday: !isHoliday, holiday: isHoliday ? { date: d, name: '测试节', type: 'holiday' } : null, dayOfWeek: 0 },
+    }), { status: 200 });
+  }
+  return _origFetch ? _origFetch(url, init) : new Response('{}', { status: 404 });
+};
+
 const db = new DatabaseSync(':memory:');
 db.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
 // 按真实部署顺序跑迁移：0002 补列（内存库是全新的，ALTER 可直接执行）+ 0003 建 jobs 表
@@ -25,6 +41,7 @@ db.exec(readFileSync(new URL('../migrations/0005_notifications_job_id.sql', impo
 db.exec(readFileSync(new URL('../migrations/0006_notifications_job_index.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0007_notifications_rejected.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0008_strong_vibrate.sql', import.meta.url), 'utf8'));
+db.exec(readFileSync(new URL('../migrations/0009_skip_holiday.sql', import.meta.url), 'utf8'));
 
 // ---- 极简 D1 适配层 ----
 const stmt = (sql) => {
@@ -379,6 +396,40 @@ ck('遗留带秒数据自愈为整分钟',
   db.prepare('SELECT next_run_at FROM jobs WHERE id=?').get(idLegacy).next_run_at === L(21, 22, 0),
   String(db.prepare('SELECT next_run_at FROM jobs WHERE id=?').get(idLegacy).next_run_at - L(21, 22, 0)));
 db.prepare('DELETE FROM jobs WHERE id=?').run(idLegacy);
+
+/* ---------------- 跳过节假日（skip_holiday） ---------------- */
+
+// 清空 jobs 表：前面用例遗留的启用任务 next_run_at 都很早（2026-09-10 附近），若不清空，
+// 后面用 2026-10 的时间戳调用 runDueJobs 会把它们一并扫到、干扰「只验证本组任务」的断言。
+db.prepare('DELETE FROM jobs').run();
+
+// 21) 周期任务在节假日当天：只推进 next_run_at，不投递；次日（工作日）正常触发
+const holidayTs = Date.UTC(2026, 9, 1, 1, 0, 0);   // 本地(+08:00) 2026-10-01 09:00
+const idH = insertJob('daily:09:00', holidayTs, 1, '节假日跳过');
+db.prepare('UPDATE jobs SET skip_holiday=1 WHERE id=?').run(idH);
+await runDueJobs(env, holidayTs);
+ck('节假日当天不投递', countJob(idH) === 0, 'c=' + countJob(idH));
+ck('节假日跳过后推进到次日',
+  db.prepare('SELECT next_run_at FROM jobs WHERE id=?').get(idH).next_run_at === Date.UTC(2026, 9, 2, 1, 0, 0));
+// 次日（工作日）应正常触发
+await runDueJobs(env, Date.UTC(2026, 9, 2, 1, 0, 0));
+ck('次日（工作日）正常触发', countJob(idH) === 1, 'c=' + countJob(idH));
+db.prepare('DELETE FROM jobs WHERE id=?').run(idH);
+
+// 22) 工作日启用跳过开关时照常触发（开关不误伤工作日）
+const idW = insertJob('daily:09:00', Date.UTC(2026, 9, 5, 1, 0, 0), 1, '工作日触发');  // 2026-10-05 周一
+db.prepare('UPDATE jobs SET skip_holiday=1 WHERE id=?').run(idW);
+await runDueJobs(env, Date.UTC(2026, 9, 5, 1, 0, 0));
+ck('工作日（跳过开关开）照常触发', countJob(idW) === 1, 'c=' + countJob(idW));
+db.prepare('DELETE FROM jobs WHERE id=?').run(idW);
+
+// 23) once 任务忽略跳过开关：指定日期即便是节假日也会触发并自动停用
+const idO = insertJob('once:2026-10-01T09:00', Date.UTC(2026, 9, 1, 1, 0, 0), 1, '一次性节假日');
+db.prepare('UPDATE jobs SET skip_holiday=1 WHERE id=?').run(idO);
+await runDueJobs(env, Date.UTC(2026, 9, 1, 1, 0, 0));
+ck('once 忽略跳过开关仍触发', countJob(idO) === 1, 'c=' + countJob(idO));
+ck('once 触发后自动停用', db.prepare('SELECT enabled FROM jobs WHERE id=?').get(idO).enabled === 0);
+db.prepare('DELETE FROM jobs WHERE id=?').run(idO);
 
 console.log(bad ? '\n' + bad + ' FAILED' : '\nALL PASS');
 process.exit(bad ? 1 : 0);

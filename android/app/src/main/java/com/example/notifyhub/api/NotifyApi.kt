@@ -75,6 +75,8 @@ data class JobItem(
     @SerializedName("sent_count") val sentCount: Int?,
     // 1 = 强力震动；0 = 普通提醒。与 key 的同名字段互相独立（任务与外部 key 是两条来源）
     @SerializedName("strong_vibrate") val strongVibrate: Int?,
+    // 1 = 跳过非工作日（含周末），当天不触发；仅周期型任务生效，once 忽略
+    @SerializedName("skip_holiday") val skipHoliday: Int?,
     // 服务端算好的中文描述，如「每 5 分钟」「每天 09:00（+08:00）」
     val desc: String?
 )
@@ -85,7 +87,8 @@ data class CreateJobReq(
     val tz: String,
     val body: String = "",
     val enabled: Boolean = true,
-    @SerializedName("strong_vibrate") val strongVibrate: Boolean = false
+    @SerializedName("strong_vibrate") val strongVibrate: Boolean = false,
+    @SerializedName("skip_holiday") val skipHoliday: Boolean = false
 )
 data class UpdateJobReq(
     val name: String? = null,
@@ -93,7 +96,8 @@ data class UpdateJobReq(
     val tz: String? = null,
     val body: String? = null,
     val enabled: Boolean? = null,
-    @SerializedName("strong_vibrate") val strongVibrate: Boolean? = null
+    @SerializedName("strong_vibrate") val strongVibrate: Boolean? = null,
+    @SerializedName("skip_holiday") val skipHoliday: Boolean? = null
 )
 data class JobResp(val id: Long, @SerializedName("next_run_at") val nextRunAt: Long?, val desc: String?)
 

@@ -12,6 +12,7 @@
 import { json, readJson } from './utils.js';
 import { parseSchedule, parseOffset, nextRunAt, describeSchedule, floorMinute } from './schedule.js';
 import { deliver } from './deliver.js';
+import { isHoliday, ymdLocal } from './holiday.js';
 
 const MAX_PER_TICK = 100;        // 单 tick 最多执行的 job 数，超出顺延到下一分钟
 const MAX_JOBS_PER_USER = 50;
@@ -52,6 +53,24 @@ export async function runDueJobs(env, nowMs) {
 async function fireJob(env, job, now) {
   const offset = parseOffset(job.tz) ?? 0;
   const firedAt = Number(job.next_run_at);
+
+  // 跳过非工作日：仅周期型任务生效（once 指定了具体日期就是要触发，不受节假日影响）。
+  // 当天按任务时区换算出的本地日期若是节假日，则只推进 next_run_at、不投递 —— 避免节假日被打扰。
+  // 若节假日 API 异常，isHoliday 返回 false（不跳过），宁可多一条提醒也不让任务永久沉默。
+  if (job.skip_holiday && !String(job.schedule).startsWith('once:')) {
+    const dateStr = ymdLocal(firedAt, offset);
+    let holiday = false;
+    try { holiday = await isHoliday(dateStr); } catch { holiday = false; }
+    if (holiday) {
+      const next = nextRunAt(job.schedule, offset, now, firedAt);
+      const ts = Date.now();
+      await env.DB.prepare(
+        'UPDATE jobs SET next_run_at=?, updated_at=? WHERE id=? AND next_run_at=?'
+      ).bind(next, ts, job.id, firedAt).run();
+      console.log('job_skipped_holiday', JSON.stringify({ id: job.id, date: dateStr, next }));
+      return;
+    }
+  }
 
   // 默认类型通知：标题固定取任务名称（jobs.title 已废弃不再读取），正文取通知内容。
   // 正文不能为空 —— deliver 对空正文只入库不推送，会让任务看着像没触发。
@@ -112,7 +131,7 @@ export async function listJobs(request, env, userId) {
     ...j,
     // 标题固定为任务名称，端侧无需再拼接
     title: j.name || '',
-    desc: describeSchedule(j.schedule, j.tz),
+    desc: describeSchedule(j.schedule, j.tz) + (j.skip_holiday ? '（跳过节假日）' : ''),
     sent_count: sentMap.get(Number(j.id)) || 0,
   }));
   return json({ jobs });
@@ -139,9 +158,10 @@ export async function createJob(request, env, userId) {
   const next = nextRunAt(schedule, offset, now, now);
   // key_id 恒为 NULL：定时任务不挂外部 key。旧版客户端仍会传 key_id，这里直接忽略（不报错）。
   // title 列已废弃（标题一律取任务名称），保留列不写值。
+  const skipHoliday = b.skip_holiday ? 1 : 0;
   const res = await env.DB.prepare(
-    `INSERT INTO jobs (user_id, key_id, name, schedule, tz, title, body, enabled, strong_vibrate, next_run_at, created_at, updated_at)
-     VALUES (?,NULL,?,?,?,NULL,?,?,?,?,?,?)`
+    `INSERT INTO jobs (user_id, key_id, name, schedule, tz, title, body, enabled, strong_vibrate, skip_holiday, next_run_at, created_at, updated_at)
+     VALUES (?,NULL,?,?,?,NULL,?,?,?,?,?,?,?)`
   ).bind(
     userId,
     name,
@@ -149,6 +169,7 @@ export async function createJob(request, env, userId) {
     String(b.body || '').slice(0, 8000),
     b.enabled === false ? 0 : 1,
     b.strong_vibrate ? 1 : 0,
+    skipHoliday,
     next, now, now,
   ).run();
 
@@ -172,6 +193,7 @@ export async function updateJob(request, env, userId, id) {
   const enabled = b.enabled !== undefined ? (b.enabled ? 1 : 0) : job.enabled;
   // 与 updateKey 同策略：字段不传就不改（旧版客户端不会带这个字段，不能把用户的开关抹掉）
   const strongVibrate = b.strong_vibrate !== undefined ? (b.strong_vibrate ? 1 : 0) : job.strong_vibrate;
+  const skipHoliday = b.skip_holiday !== undefined ? (b.skip_holiday ? 1 : 0) : job.skip_holiday;
 
   const now = Date.now();
   // 计划变更、或把停用的任务重新启用时，重算下次触发时刻（否则残留的旧时刻会让它立刻补跑一次）
@@ -180,9 +202,9 @@ export async function updateJob(request, env, userId, id) {
 
   // key_id 不参与更新（恒为 NULL）；title 列已废弃，不再写入
   await env.DB.prepare(
-    `UPDATE jobs SET name=?, schedule=?, tz=?, body=?, enabled=?, strong_vibrate=?, next_run_at=?, updated_at=?
+    `UPDATE jobs SET name=?, schedule=?, tz=?, body=?, enabled=?, strong_vibrate=?, skip_holiday=?, next_run_at=?, updated_at=?
       WHERE id=? AND user_id=?`
-  ).bind(name, schedule, tz, body, enabled, strongVibrate, next, now, id, userId).run();
+  ).bind(name, schedule, tz, body, enabled, strongVibrate, skipHoliday, next, now, id, userId).run();
 
   return json({ ok: true, next_run_at: next, desc: describeSchedule(schedule, tz) });
 }

@@ -162,6 +162,14 @@
             android:layout_height="wrap_content" />
 
         <CheckBox
+            android:id="@+id/cbSkipHoliday"
+            android:text="跳过节假日（当天为非工作日时不触发，仅周期型任务生效）"
+            android:textSize="14sp"
+            android:layout_marginTop="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <CheckBox
             android:id="@+id/cbEnabled"
             android:text="启用此任务"
             android:textSize="14sp"
