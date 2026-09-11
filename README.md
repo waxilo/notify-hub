@@ -30,23 +30,19 @@
 
 ## QQ 机器人接入（一次性，约 10 分钟）
 
-1. **注册机器人**：打开 [q.qq.com](https://q.qq.com) 扫码登录 → 创建机器人（个人身份证认证即可），记下 `AppID` 与 `AppSecret`（Secret 只显示一次，忘可重置）。
-2. **配置 Worker 凭证**：
-   ```bash
-   cd worker
-   npx wrangler secret put QQ_APP_ID
-   npx wrangler secret put QQ_APP_SECRET
-   ```
+1. **注册机器人**：打开 [q.qq.com](https://q.qq.com) 扫码登录 → 创建机器人（个人身份证认证即可；龙虾专用入口 q.qq.com/qqbot/openclaw 建的「私人机器人」也是标准机器人，同样适用），记下 `AppID` 与 `AppSecret`（Secret 只显示一次，忘可重置）。
+2. **Web 控制台填凭证**：登录 Web 控制台 →「机器人」页 → 填入 AppID/AppSecret → 保存。**保存即生效，无需重新部署**；旁边「测试连接」会真实换取一次 access_token 验证凭证。
+   - 也可走命令行兜底：`npx wrangler secret put QQ_APP_ID` / `QQ_APP_SECRET`（Web 配置的值优先于 env）。
 3. **配置回调 URL**：在机器人管理端「沙箱配置」（或正式配置）把回调地址设为：
    ```
    https://notify-hub-worker.sloan.dpdns.org/api/qq/callback
    ```
    平台做 URL 验证时，本服务会按官方要求回显 AppSecret；之后所有事件都会带 Ed25519 签名（密钥 seed = AppSecret），Worker 侧验签后才处理。
-4. **绑定触达目标**（两种可任选或都做，openid 自动捕获存 D1 `settings` 表）：
+4. **绑定触达目标**（两种可任选或都做，openid 自动捕获存 D1 `settings` 表，「机器人」页可见绑定状态）：
+   - **绑定 QQ 私聊（私人机器人，当前使用）**：在 QQ 里搜索/添加机器人为好友（沙箱成员扫码即可），然后 **私聊机器人发一句话** → `C2C_MESSAGE_CREATE` 自动捕获 `user_openid`。
    - **绑定 QQ 群**：把机器人拉进你的 QQ 群，在群里 **@机器人 随便说句话** → `GROUP_AT_MESSAGE_CREATE` 自动捕获 `group_openid`。换群：在新群里再 @一次 即自动切换。
-   - **绑定 QQ 私聊（私人机器人）**：在 QQ 里搜索/添加机器人为好友（沙箱成员扫码即可），然后 **私聊机器人发一句话** → `C2C_MESSAGE_CREATE` 自动捕获 `user_openid`。
    - 多群/固定目标（可选）：`npx wrangler secret put QQ_GROUP_OPENID` / `QQ_USER_OPENID` 显式指定，优先于自动捕获。
-5. **选择触达目标**（`worker/wrangler.toml` 的 `[vars]`）：`QQ_TARGET = "group"`（默认，只发群）/ `"c2c"`（只发私聊）/ `"both"`（都发）。改完 `npx wrangler deploy` 生效。
+5. **选择触达目标**：Web 控制台「机器人」页直接切（私聊 / 群 / 都发，保存即生效）；`wrangler.toml` 的 `[vars] QQ_TARGET` 只是未在 Web 配置时的兜底值（当前为 `c2c`）。
 6. **验证**：浏览器访问 `https://…/hook/<KEY>?message=hello`，QQ 群/私聊应收到「key 名称 + hello」。
 
 > 龙虾（OpenClaw）用户注意：`q.qq.com/qqbot/openclaw` 专用入口创建的「私人机器人」就是标准 QQ 机器人（同一套 AppID/AppSecret/OpenAPI），notify-hub 直接用它的凭证接入即可 —— **不需要部署 OpenClaw，也不需要任何网关容器**。私人机器人官方建议私聊为主，正适合本场景。
@@ -67,7 +63,7 @@ npx wrangler deploy
 npm run deploy:pages
 ```
 
-`JWT_SECRET` / `QQ_APP_ID` / `QQ_APP_SECRET` 均为 Worker Secret，不在代码库里。
+`JWT_SECRET` 为 Worker Secret；QQ 机器人凭证优先在 Web 控制台「机器人」页配置（存 D1 settings，改完即时生效），env/secret 仅作兜底。
 
 ## Webhook 用法
 
