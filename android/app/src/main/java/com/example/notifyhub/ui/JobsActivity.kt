@@ -341,6 +341,7 @@ class JobsActivity : AppCompatActivity() {
             val tvName: TextView = v.findViewById(R.id.tvName)
             val tvStatus: TextView = v.findViewById(R.id.tvStatus)
             val tvSchedule: TextView = v.findViewById(R.id.tvSchedule)
+            val tvStrongVibrate: TextView = v.findViewById(R.id.tvStrongVibrate)
             val tvMeta: TextView = v.findViewById(R.id.tvMeta)
             val btnHistory: Button = v.findViewById(R.id.btnHistory)
             val btnEdit: Button = v.findViewById(R.id.btnEdit)
@@ -366,6 +367,7 @@ class JobsActivity : AppCompatActivity() {
                 h.tvStatus.setTextColor(0xFF8A93A6.toInt())
             }
             h.tvSchedule.text = j.desc ?: j.schedule
+            h.tvStrongVibrate.visibility = if (j.strongVibrate == 1) View.VISIBLE else View.GONE
             val nextText = if (on) (j.nextRunAt?.let { fmtAt(it, j.tz ?: "+08:00") } ?: "—") else "（已停用）"
             val lastText = j.lastRunAt?.let { fmtAt(it, j.tz ?: "+08:00") } ?: "从未执行"
             // 通知标题固定为任务名称，正文是通知内容（留空则同任务名），与外部 key 无关
