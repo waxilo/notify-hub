@@ -3,6 +3,7 @@
 //      / 与外部 key 解耦（通知不带 key、标题取任务名称）
 //      / 通知归到 job_id（可查历史、可按 job 或按 key 清空、删任务/删 key 连带清历史）
 //      / 停用 key 的调用留痕（rejected=key_disabled，只入库不推送、窗口内不刷屏）
+//      / QQ 官方机器人触达（触发即发群消息；网关失败不影响入库）
 // 运行：cd worker && node test/jobs.smoke.js
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
@@ -12,18 +13,33 @@ import { clearNotifications } from '../src/notifications.js';
 import { deleteKey, updateKey } from '../src/keys.js';
 import { handleWebhook } from '../src/webhook.js';
 
-// 节假日 API 仅在 skip_holiday 用例里被调用；此处 mock 掉，避免测试依赖外网。
-// 规则：2026-10-01 记为节假日（isHoliday=true），其余日期为工作日。非 holiday 请求走原始 fetch 兜底。
+// 外部依赖全部 mock 掉，避免测试依赖外网：
+//   1) 节假日 API：2026-10-01 记为节假日（isHoliday=true），其余日期为工作日
+//   2) QQ 机器人 API：getAppAccessToken 发 token；群消息接口记录调用并可注入失败
 const _origFetch = global.fetch;
+let qqSendFail = false;               // 置 true 时模拟 QQ 群消息接口报错
+const qqTokenCalls = [];
+const qqCalls = [];                   // [{ to, text, msg_type }]
 global.fetch = async (url, init) => {
-  if (String(url).includes('holidays/date/')) {
-    const m = String(url).match(/holidays\/date\/(\d{4}-\d{2}-\d{2})/);
+  const u = String(url);
+  if (u.includes('holidays/date/')) {
+    const m = u.match(/holidays\/date\/(\d{4}-\d{2}-\d{2})/);
     const d = m ? m[1] : '';
     const isHoliday = d === '2026-10-01';
     return new Response(JSON.stringify({
       code: 0, msg: 'success',
       data: { date: d, isHoliday, isWorkday: !isHoliday, holiday: isHoliday ? { date: d, name: '测试节', type: 'holiday' } : null, dayOfWeek: 0 },
     }), { status: 200 });
+  }
+  if (u.includes('getAppAccessToken')) {
+    qqTokenCalls.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ access_token: 'TEST_TOKEN', expires_in: 7200 }), { status: 200 });
+  }
+  if (u.includes('api.sgroup.qq.com')) {
+    if (qqSendFail) return new Response(JSON.stringify({ result: -1, errmsg: 'mocked failure' }), { status: 200 });
+    const body = JSON.parse(init.body);
+    qqCalls.push({ to: u.match(/groups\/([^/]+)\//)[1], text: body.content, msg_type: body.msg_type });
+    return new Response(JSON.stringify({ result: 0, msg_seq: 1 }), { status: 200 });
   }
   return _origFetch ? _origFetch(url, init) : new Response('{}', { status: 404 });
 };
@@ -32,8 +48,8 @@ const db = new DatabaseSync(':memory:');
 db.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
 // 按真实部署顺序跑迁移：0002 补列（内存库是全新的，ALTER 可直接执行）+ 0003 建 jobs 表
 // + 0004 清空 jobs.key_id + 0005 给 notifications 补 job_id + 0006 建索引 + 0007 补 rejected
-// + 0008 给 keys/jobs 补 strong_vibrate。
-// 注意线上已有库不能跑 0002 / 0005 / 0007 / 0008（列已存在会整批回滚），只能跑幂等的 0003 / 0004 / 0006。
+// + 0008 给 keys/jobs 补 strong_vibrate + 0009 补 skip_holiday + 0010 建 settings。
+// 注意线上已有库不能跑 0002 / 0005 / 0007 / 0008（列已存在会整批回滚），只能跑幂等的 0003 / 0004 / 0006 / 0010。
 db.exec(readFileSync(new URL('../migrations/0002_schema_sync.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0003_jobs.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0004_jobs_detach_key.sql', import.meta.url), 'utf8'));
@@ -42,6 +58,7 @@ db.exec(readFileSync(new URL('../migrations/0006_notifications_job_index.sql', i
 db.exec(readFileSync(new URL('../migrations/0007_notifications_rejected.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0008_strong_vibrate.sql', import.meta.url), 'utf8'));
 db.exec(readFileSync(new URL('../migrations/0009_skip_holiday.sql', import.meta.url), 'utf8'));
+db.exec(readFileSync(new URL('../migrations/0010_settings.sql', import.meta.url), 'utf8'));
 
 // ---- 极简 D1 适配层 ----
 const stmt = (sql) => {
@@ -64,13 +81,11 @@ const stmt = (sql) => {
     },
   };
 };
-const pushes = [];
 const env = {
   DB: { prepare: stmt },
-  PUSH_HUB: {
-    idFromName: (n) => ({ toString: () => n }),
-    get: () => ({ async fetch(url, init) { pushes.push(JSON.parse(init.body)); return new Response('{"ok":true,"delivered":1}'); } }),
-  },
+  QQ_APP_ID: 'TEST_APP_ID',
+  QQ_APP_SECRET: 'TEST_APP_SECRET',
+  QQ_GROUP_OPENID: 'GROUP_OPENID_X',
 };
 
 let bad = 0;
@@ -95,15 +110,15 @@ let r = await runDueJobs(env, now);
 ck('tick 触发 1 个', r.scanned === 1 && r.fired === 1, JSON.stringify(r));
 let n = db.prepare('SELECT COUNT(*) c FROM notifications').get();
 ck('产生 1 条通知', n.c === 1, 'count=' + n.c);
-ck('推送到 DO', pushes.length === 1, JSON.stringify(pushes[0] || {}));
-// 定时任务不挂 key：推送里 key_name 为空，标题取任务名称（正文留空时也用任务名，保证非空可推送）
-ck('推送不带 key_name', pushes[0].key_name === '', JSON.stringify(pushes[0].key_name));
-ck('标题 = 任务名称', pushes[0].title === '任务', JSON.stringify(pushes[0].title));
-ck('正文空时回退为任务名', pushes[0].body === '任务', JSON.stringify(pushes[0].body));
+ck('调用 QQ 群消息接口', qqCalls.length === 1, JSON.stringify(qqCalls[0] || {}));
+ck('QQ 消息标题取任务名称', qqCalls[0].text === '任务', JSON.stringify(qqCalls[0].text));
+ck('QQ 消息为文本类型', qqCalls[0].msg_type === 0, JSON.stringify(qqCalls[0].msg_type));
 ck('通知不挂 key_id', db.prepare('SELECT key_id FROM notifications').get().key_id === null);
 // 通知归到任务名下：任务列表能统计「已发送 N 条」，也能按任务查历史
 ck('通知归到 job_id', db.prepare('SELECT job_id FROM notifications').get().job_id === id1,
   'job_id=' + db.prepare('SELECT job_id FROM notifications').get().job_id);
+ck('QQ 推送成功写入 delivered_at',
+  db.prepare('SELECT delivered_at FROM notifications WHERE job_id=?').get(id1).delivered_at !== null);
 let j = db.prepare('SELECT * FROM jobs WHERE id=?').get(id1);
 // 间隔基于「计划时刻」递推而非当前时间，避免漂移；且该基准先对齐整分钟（丢弃创建/执行时刻的秒），
 // 所以是 floor(now-1000)+5m = 09:04:00，不是 (now-1000)+5m
@@ -250,7 +265,7 @@ ck('统计查询命中 idx_notif_job', JSON.stringify(planGroup).includes('idx_n
 
 // 15) key 停用后外部往往还在按原节奏调用：不能静默 403，要在历史里留一条「停用拒绝」
 db.prepare('INSERT INTO keys (id, user_id, key, name, created_at, active, mode) VALUES (3,1,?,?,?,0,?)').run('k3', '停用通道', now, 'default');
-const pushBefore = pushes.length;
+const qqBefore = qqCalls.length;
 const notifBefore = countAll();
 const hook = (qs = '') => handleWebhook(new Request('https://x/hook/k3' + qs, { method: 'GET' }), env, 'k3');
 
@@ -263,83 +278,53 @@ ck('留痕标题取 key 名', rej && rej.title === '停用通道', JSON.stringif
 ck('留痕保留原始内容', rej && rej.body === '外部还在发', JSON.stringify(rej && rej.body));
 ck('留痕不挂 job_id', rej && rej.job_id === null);
 ck('留痕记在 key_id 上', rej && rej.key_id === 3);
-ck('停用调用不推送', pushes.length === pushBefore, 'pushes=' + (pushes.length - pushBefore));
+ck('停用调用不推送 QQ', qqCalls.length === qqBefore, 'qq=' + (qqCalls.length - qqBefore));
 ck('停用调用不更新 last_used', db.prepare('SELECT last_used FROM keys WHERE id=3').get().last_used === null);
 
 // 同一 5 分钟窗口内重复调用不再新增（外部高频重试不会把历史刷爆）
 hr = await hook('?message=' + encodeURIComponent('再来一次'));
 ck('窗口内重复调用不刷屏', countAll() === notifBefore + 1 && hr.status === 403, 'c=' + countAll());
 
-// 重新启用后恢复正常：写入 + 推送，且不受前面的拒绝记录影响
+// 重新启用后恢复正常：写入 + QQ 推送，且不受前面的拒绝记录影响
 db.prepare('UPDATE keys SET active=1 WHERE id=3').run();
-const pushBefore2 = pushes.length;
+const qqBefore2 = qqCalls.length;
 hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('恢复后正常'), { method: 'GET' }), env, 'k3');
 ck('启用后调用恢复正常', hr.status === 201, 'status=' + hr.status);
-ck('启用后正常推送', pushes.length === pushBefore2 + 1, 'pushes=' + (pushes.length - pushBefore2));
+ck('启用后正常推送 QQ', qqCalls.length === qqBefore2 + 1, 'qq=' + (qqCalls.length - qqBefore2));
 ck('启用后写入的是正常记录', db.prepare('SELECT rejected FROM notifications WHERE key_id=3 ORDER BY id DESC LIMIT 1').get().rejected === null);
+const okResp = await hr.json();
+ck('webhook 响应带 delivered 标记', okResp.delivered === true, JSON.stringify(okResp));
 
-/* ---------------- 强力震动开关（strong_vibrate） ---------------- */
+/* ---------------- QQ 通道的失败隔离 ---------------- */
 
-// 16) key 默认值 → webhook 按次覆盖 → WS payload 的 vibrate 字段
-// 震动不落库：写库的 notifications 行里没有这一列，只有推送给 App 的 payload 带
-db.prepare('INSERT INTO keys (id, user_id, key, name, created_at, active, mode, strong_vibrate) VALUES (4,1,?,?,?,1,?,1)')
-  .run('k4', '强震通道', now, 'default');
-db.prepare('INSERT INTO keys (id, user_id, key, name, created_at, active, mode, strong_vibrate) VALUES (5,1,?,?,?,1,?,0)')
-  .run('k5', '普通通道', now, 'default');
-const lastPush = () => pushes[pushes.length - 1];
+// 16) 群消息接口报错：通知仍入库（不丢），接口照常返回，delivered_at 留空
+qqSendFail = true;
+const qqBefore3 = qqCalls.length;
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('QQ挂了也要入库'), { method: 'GET' }), env, 'k3');
+ck('QQ 失败时 webhook 仍返回 201', hr.status === 201, 'status=' + hr.status);
+ck('QQ 失败时响应 delivered=false', (await hr.json()).delivered === false);
+ck('QQ 失败时不重试不阻塞', qqCalls.length === qqBefore3);
+const failN = db.prepare('SELECT * FROM notifications WHERE body=?').get('QQ挂了也要入库');
+ck('QQ 失败时通知仍入库', !!failN, JSON.stringify(failN && failN.id));
+ck('QQ 失败时 delivered_at 为空（历史显示未送达）', failN && failN.delivered_at === null);
+qqSendFail = false;
 
-await handleWebhook(new Request('https://x/hook/k5?message=a', { method: 'GET' }), env, 'k5');
-ck('普通 key 推送 vibrate=false', lastPush().vibrate === false, 'v=' + lastPush().vibrate);
+// 17) 群 openid 未配置：同样只入库不推送
+const envNoGroup = { ...env, QQ_GROUP_OPENID: '' };
+db.prepare("DELETE FROM settings WHERE k='qq_group_openid'").run();
+const qqBefore4 = qqCalls.length;
+hr = await handleWebhook(new Request('https://x/hook/k3?message=' + encodeURIComponent('没配群号'), { method: 'GET' }), envNoGroup, 'k3');
+ck('未配置群 openid 时仍返回 201', hr.status === 201, 'status=' + hr.status);
+ck('未配置群 openid 时不调 QQ', qqCalls.length === qqBefore4, 'qq=' + (qqCalls.length - qqBefore4));
+ck('未配置群 openid 时通知仍入库', countAll() === notifBefore + 3, 'c=' + countAll());
 
-await handleWebhook(new Request('https://x/hook/k5?message=b&vibrate=1', { method: 'GET' }), env, 'k5');
-ck('?vibrate=1 按次覆盖为 true', lastPush().vibrate === true, 'v=' + lastPush().vibrate);
+/* ---------------- createJob / updateJob 的写入路径 ---------------- */
 
-await handleWebhook(new Request('https://x/hook/k4?message=c', { method: 'GET' }), env, 'k4');
-ck('强震 key 默认推送 vibrate=true', lastPush().vibrate === true, 'v=' + lastPush().vibrate);
-
-await handleWebhook(new Request('https://x/hook/k4?message=d&vibrate=0', { method: 'GET' }), env, 'k4');
-ck('?vibrate=0 按次覆盖为 false', lastPush().vibrate === false, 'v=' + lastPush().vibrate);
-
-await handleWebhook(new Request('https://x/hook/k5', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ message: 'e', vibrate: 1 }),
-}), env, 'k5');
-ck('POST body 的 vibrate 字段生效', lastPush().vibrate === true, 'v=' + lastPush().vibrate);
-
-// 17) 定时任务透传：job.strong_vibrate → WS payload
-// 同一次 tick 可能触发多个任务，所以按「该任务的 notification id」去找对应那条推送，不依赖顺序
-const pushForJob = (jobId) => {
-  const row = db.prepare('SELECT id FROM notifications WHERE job_id=? ORDER BY id DESC LIMIT 1').get(jobId);
-  return row ? pushes.find((p) => p.id === row.id) : undefined;
-};
-const jobIdV = insertJob('every:5m', now - 1000, 1, '强震任务');
-db.prepare('UPDATE jobs SET strong_vibrate=1 WHERE id=?').run(jobIdV);
-await runDueJobs(env, now);
-ck('定时任务强震透传到推送', pushForJob(jobIdV)?.vibrate === true, JSON.stringify(pushForJob(jobIdV) || {}));
-
-const jobIdN = insertJob('every:5m', now - 1000, 1, '普通任务');
-await runDueJobs(env, now);
-ck('定时任务未开强震时为 false', pushForJob(jobIdN)?.vibrate === false, JSON.stringify(pushForJob(jobIdN) || {}));
-
-// 18) keys.js 的 updateKey：能写开关，且「不传就不改」（旧版客户端局部更新不会误清）
-await updateKey(new Request('https://x/api/keys/5', {
-  method: 'PUT', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ strong_vibrate: true }),
-}), env, 1, 5);
-ck('updateKey 可打开强震开关', db.prepare('SELECT strong_vibrate FROM keys WHERE id=5').get().strong_vibrate === 1);
-
-await updateKey(new Request('https://x/api/keys/5', {
-  method: 'PUT', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ name: '改个名' }),
-}), env, 1, 5);
-ck('updateKey 不传开关时保留原值', db.prepare('SELECT strong_vibrate FROM keys WHERE id=5').get().strong_vibrate === 1);
-
-// 19) createJob / updateJob 的写入路径
-// 这两条曾经出问题：updateJob 的 SQL 加了 strong_vibrate 占位符却忘了定义对应变量（线上 500），
-// createJob 的 INSERT 则整列都没带（新建任务的开关被静默丢弃）。此处把两条路径一起锁住。
+// 18) 这两条曾经出问题：updateJob 的 SQL 加了占位符却忘了定义对应变量（线上 500），
+//     createJob 的 INSERT 则整列都没带（新建任务的开关被静默丢弃）。此处把两条路径一起锁住。
 const mkBody = (over = {}) => JSON.stringify({
   name: '打卡提醒', body: '远程签到30元', schedule: 'daily:21:01', tz: '+08:00',
-  enabled: true, strong_vibrate: true, ...over,
+  enabled: true, skip_holiday: true, ...over,
 });
 
 const crRes = await createJob(new Request('https://x/api/jobs', {
@@ -347,22 +332,29 @@ const crRes = await createJob(new Request('https://x/api/jobs', {
 }), env, 1);
 ck('createJob 返回 201', crRes.status === 201, 'status=' + crRes.status);
 const newJobId = (await crRes.json()).id;
-ck('createJob 写入 strong_vibrate=1',
-  db.prepare('SELECT strong_vibrate FROM jobs WHERE id=?').get(newJobId).strong_vibrate === 1);
+ck('createJob 写入 skip_holiday=1',
+  db.prepare('SELECT skip_holiday FROM jobs WHERE id=?').get(newJobId).skip_holiday === 1);
 
 const upRes = await updateJob(new Request('https://x/api/jobs/' + newJobId, {
-  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: mkBody(),
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: mkBody({ skip_holiday: false }),
 }), env, 1, newJobId);
 ck('updateJob 返回 200（原为 500）', upRes.status === 200, 'status=' + upRes.status);
-ck('updateJob 写入 strong_vibrate=1',
-  db.prepare('SELECT strong_vibrate FROM jobs WHERE id=?').get(newJobId).strong_vibrate === 1);
+ck('updateJob 写入 skip_holiday=0',
+  db.prepare('SELECT skip_holiday FROM jobs WHERE id=?').get(newJobId).skip_holiday === 0);
 
 await updateJob(new Request('https://x/api/jobs/' + newJobId, {
   method: 'PUT', headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ name: '改个名' }),
 }), env, 1, newJobId);
 ck('updateJob 不传开关时保留原值',
-  db.prepare('SELECT strong_vibrate FROM jobs WHERE id=?').get(newJobId).strong_vibrate === 1);
+  db.prepare('SELECT skip_holiday FROM jobs WHERE id=?').get(newJobId).skip_holiday === 0);
+
+// 19) 旧客户端传来的废弃字段（strong_vibrate）被安全忽略，不报错也不写库
+const legacyRes = await createJob(new Request('https://x/api/jobs', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: '旧客户端', schedule: 'daily:08:00', tz: '+08:00', strong_vibrate: true }),
+}), env, 1);
+ck('createJob 忽略废弃字段不报错', legacyRes.status === 201, 'status=' + legacyRes.status);
 
 /* ---------------- 秒对齐（创建时刻与 Cron 到达时刻的秒都不可控） ---------------- */
 
