@@ -202,6 +202,18 @@ export async function handleCallback(request, env) {
   let payload;
   try { payload = JSON.parse(raw); } catch { return json({ error: 'bad json' }, 400); }
 
+  // 请求留痕（排查回调配置问题用；只保留最近一次）
+  try {
+    await setSetting(env, 'qq_last_callback', JSON.stringify({
+      ts: new Date().toISOString(),
+      ua: request.headers.get('User-Agent') || '',
+      bot_appid: request.headers.get('X-Bot-Appid') || '',
+      op: payload.op,
+      d_keys: payload.d ? Object.keys(payload.d).join(',') : '',
+      raw: raw.slice(0, 2000),
+    }));
+  } catch { /* 留痕失败不影响主流程 */ }
+
   // URL 验证（op=13）：按官方要求用 secret 派生私钥签 event_ts+plain_token 并回显 JSON
   if (payload.op === 13) {
     const d = payload.d || {};
