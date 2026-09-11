@@ -29,5 +29,9 @@ deleted_classes = ["PushHub"]
 # QQ 官方机器人凭证与回调，全部用命令设置（不要写在这里）：
 #   wrangler secret put QQ_APP_ID
 #   wrangler secret put QQ_APP_SECRET
-# 群 openid 由 /api/qq/callback 首次 @机器人 时自动捕获存库；
-# 如需固定目标群（沙箱/多群），可额外：wrangler secret put QQ_GROUP_OPENID
+# openid 自动捕获：群里 @机器人 → qq_group_openid；私聊机器人 → qq_user_openid。
+# 如需固定目标（沙箱/多群/指定好友），可额外：wrangler secret put QQ_GROUP_OPENID / QQ_USER_OPENID
+#
+# 触达目标：group=只发群（默认）/ c2c=只发私聊 / both=都发（改完需 wrangler deploy 生效）
+[vars]
+QQ_TARGET = "group"

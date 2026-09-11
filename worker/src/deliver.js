@@ -5,7 +5,7 @@
 //   消息**先入库再推送** —— QQ 网关失败/未配置时通知不丢，历史里显示「未送达」；
 //   推送成功才写 delivered_at（历史里显示「已送达」）。
 import { json } from './utils.js';
-import { sendGroupMessage } from './qq.js';
+import { sendGroupMessage, sendC2CMessage, getTargetKinds } from './qq.js';
 
 const DEDUP_WINDOW_MS = 300_000;   // 5 分钟防重窗口
 
@@ -53,14 +53,22 @@ export async function deliver(env, opts) {
   // 空内容只入库不推送（历史里展示为「空消息」）
   if (!b.trim()) return { id, empty: true };
 
-  // QQ 群推送：成功才写 delivered_at；失败只记日志，不影响入库与接口响应
+  // QQ 推送：目标由 QQ_TARGET 决定（group / c2c / both）。
+  // 至少一个目标送达即写 delivered_at；单目标失败只记日志，不影响入库与接口响应，
+  // 未捕获 openid 的目标视为未配置（抛错走同一隔离路径）。
   let qqSent = false;
-  try {
-    await sendGroupMessage(env, t + '\n' + b);
-    qqSent = true;
+  for (const kind of getTargetKinds(env)) {
+    try {
+      const text = t + '\n' + b;
+      if (kind === 'group') await sendGroupMessage(env, text);
+      else await sendC2CMessage(env, text);
+      qqSent = true;
+    } catch (err) {
+      console.error('deliver_qq_error', JSON.stringify({ id, target: kind, err: String(err).slice(0, 300) }));
+    }
+  }
+  if (qqSent) {
     await env.DB.prepare('UPDATE notifications SET delivered_at=? WHERE id=?').bind(Date.now(), id).run();
-  } catch (err) {
-    console.error('deliver_qq_error', JSON.stringify({ id, err: String(err).slice(0, 300) }));
   }
 
   return { id, qq_sent: qqSent };
