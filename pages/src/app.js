@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
 import { API_BASE } from './config.js?v=20260911c';
-import { api, setToken, isLoggedIn } from './api.js?v=20260911c';
+import { api, setToken, isLoggedIn } from './api.js?v=20260911d';
 
 
 const $ = (sel) => document.querySelector(sel);
@@ -74,6 +74,7 @@ async function mainView() {
     <nav class="topnav">
       <button id="tab-keys" class="active">Key 管理</button>
       <button id="tab-jobs">定时任务</button>
+      <button id="tab-qqbot">机器人</button>
       <button id="tab-docs">接入文档</button>
       <button id="tab-acct">账号</button>
       <button id="logout" class="ghost">退出</button>
@@ -82,12 +83,14 @@ async function mainView() {
   <main>
     <section id="view-keys"></section>
     <section id="view-jobs" hidden></section>
+    <section id="view-qqbot" hidden></section>
     <section id="view-docs" hidden></section>
     <section id="view-acct" hidden></section>
   </main>
   <div id="modal-root"></div>`;
   $('#tab-keys').onclick = () => switchTab('tab-keys', 'view-keys');
   $('#tab-jobs').onclick = () => { switchTab('tab-jobs', 'view-jobs'); renderJobs(); };
+  $('#tab-qqbot').onclick = () => { switchTab('tab-qqbot', 'view-qqbot'); renderQQBot(); };
   $('#tab-docs').onclick = () => { switchTab('tab-docs', 'view-docs'); renderDocs(); };
   $('#tab-acct').onclick = () => { switchTab('tab-acct', 'view-acct'); renderAccount(); };
   $('#logout').onclick = () => { setToken(null); authView(); };
@@ -95,9 +98,83 @@ async function mainView() {
 }
 
 function switchTab(tabId, viewId) {
-  ['tab-keys', 'tab-jobs', 'tab-docs', 'tab-acct'].forEach((t) => $('#' + t).classList.remove('active'));
+  ['tab-keys', 'tab-jobs', 'tab-qqbot', 'tab-docs', 'tab-acct'].forEach((t) => $('#' + t).classList.remove('active'));
   $('#' + tabId).classList.add('active');
-  ['view-keys', 'view-jobs', 'view-docs', 'view-acct'].forEach((v) => { $('#' + v).hidden = v !== viewId; });
+  ['view-keys', 'view-jobs', 'view-qqbot', 'view-docs', 'view-acct'].forEach((v) => { $('#' + v).hidden = v !== viewId; });
+}
+
+/* ---------- QQ 机器人 ---------- */
+
+const QQ_TARGET_LABEL = { group: 'QQ 群', c2c: 'QQ 私聊', both: '群 + 私聊都发' };
+
+async function renderQQBot() {
+  const view = $('#view-qqbot');
+  view.innerHTML = '<div class="card"><p class="hint">加载中…</p></div>';
+  let c;
+  try {
+    c = await api.getQQConfig();
+  } catch (err) {
+    view.innerHTML = `<div class="card"><p class="msg">加载失败：${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+
+  view.innerHTML = `
+    <div class="card">
+      <h2>机器人凭证</h2>
+      <p class="hint">在 <a href="https://q.qq.com" target="_blank" rel="noopener">QQ 开放平台</a>（或龙虾专用入口）创建机器人后，把 AppID / AppSecret 填在这里，<b>保存即生效，无需重新部署</b>。AppSecret 只在开放平台显示一次，请先复制好。</p>
+      <form id="qq-form">
+        <label>AppID<input name="app_id" value="${escapeHtml(c.app_id || '')}" placeholder="机器人 AppID" autocomplete="off" /></label>
+        <label>AppSecret<input type="password" name="app_secret" value="" placeholder="${c.has_secret ? `已配置（${escapeHtml(c.secret_masked)}），留空保持不变` : '尚未配置'}" autocomplete="new-password" /></label>
+        <label>触达目标
+          <select name="target">
+            <option value="c2c" ${c.target === 'c2c' ? 'selected' : ''}>QQ 私聊（加好友后私聊机器人完成绑定）</option>
+            <option value="group" ${c.target === 'group' ? 'selected' : ''}>QQ 群（群里 @机器人 完成绑定）</option>
+            <option value="both" ${c.target === 'both' ? 'selected' : ''}>群 + 私聊都发</option>
+          </select>
+        </label>
+        <p class="hint xs">当前目标：<b>${QQ_TARGET_LABEL[c.target] || escapeHtml(c.target)}</b>。此处配置的凭证优先于服务端 env/secret（env 兜底）。</p>
+        <div class="modal-actions" style="display:flex;gap:8px">
+          <button type="submit" class="btn primary">保存配置</button>
+          <button type="button" class="btn" id="qq-test">测试连接</button>
+        </div>
+        <p class="msg" id="qq-msg"></p>
+      </form>
+    </div>
+    <div class="card">
+      <h2>绑定状态（openid 自动捕获）</h2>
+      <p class="hint">QQ 群：${c.group_openid ? `<code>${escapeHtml(c.group_openid)}</code>（已绑定）` : '<b class="warn">未绑定</b> —— 把机器人拉进群，在群里 @它 说句话'}</p>
+      <p class="hint">QQ 私聊：${c.user_openid ? `<code>${escapeHtml(c.user_openid)}</code>（已绑定）` : '<b class="warn">未绑定</b> —— 加机器人为好友，私聊它发一句话'}</p>
+      <p class="hint xs">换群 / 换好友绑定：重新触发一次对应事件即自动更新。私聊主动消息要求对方未关闭「允许主动发送」开关（默认开）。</p>
+      <p class="hint xs">回调地址（配到开放平台的「沙箱配置」或事件配置里）：<code>${escapeHtml(API_BASE)}/api/qq/callback</code></p>
+    </div>`;
+
+  const form = $('#qq-form');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const F = form.elements;   // 不用 form.xxx：name 与 IDL 属性重名时 form.name 会返回表单自身特性
+    const body = { target: F.target.value };
+    if (F.app_id.value.trim()) body.app_id = F.app_id.value.trim();
+    if (F.app_secret.value) body.app_secret = F.app_secret.value;
+    const msg = $('#qq-msg');
+    msg.textContent = '';
+    try {
+      await api.updateQQConfig(body);
+      msg.textContent = '已保存，立即生效';
+      renderQQBot();
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+  };
+  $('#qq-test').onclick = async () => {
+    const msg = $('#qq-msg');
+    msg.textContent = '正在测试（真实换取一次 access_token）…';
+    try {
+      const r = await api.testQQ();
+      msg.textContent = r.ok ? '✓ 连接成功：凭证有效' : `✗ 连接失败：${r.error || '未知错误'}`;
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+  };
 }
 
 /* ---------- 接入文档 ---------- */

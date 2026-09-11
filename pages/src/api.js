@@ -70,4 +70,8 @@ export const api = {
   createJob: (body) => req('/jobs', 'POST', body),
   updateJob: (id, body) => req(`/jobs/${id}`, 'PUT', body),
   deleteJob: (id) => req(`/jobs/${id}`, 'DELETE'),
+  // QQ 机器人配置：secret/openid 服务端只回掩码；app_secret 留空 = 保持不变
+  getQQConfig: () => req('/qq/config'),
+  updateQQConfig: (body) => req('/qq/config', 'PUT', body),
+  testQQ: () => req('/qq/test', 'POST', {}),
 };
