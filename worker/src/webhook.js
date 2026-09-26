@@ -41,7 +41,7 @@ function extractByPath(obj, path) {
 }
 
 export async function handleWebhook(request, env, key) {
-  const row = await env.DB.prepare('SELECT id, name, user_id, active, mode, template FROM keys WHERE key=?').bind(key).first();
+  const row = await env.DB.prepare('SELECT id, name, user_id, active, mode, template, bot_id FROM `keys` WHERE `key`=?').bind(key).first();
   if (!row) return json({ error: 'invalid key' }, 404);
 
   // 标题固定为 key 名称；内容统一取 message
@@ -123,11 +123,13 @@ export async function handleWebhook(request, env, key) {
   if (body.length > 8000) body = body.slice(0, 8000);
   if (dedupKey.length > 128) dedupKey = dedupKey.slice(0, 128);
 
-  await env.DB.prepare('UPDATE keys SET last_used=? WHERE id=?').bind(Date.now(), row.id).run();
+  await env.DB.prepare('UPDATE `keys` SET last_used=? WHERE id=?').bind(Date.now(), row.id).run();
 
-  // 入库 + QQ 推送走公共函数（与定时 job 同一条链路）
+  // 入库 + QQ 推送走公共函数（与定时 job 同一条链路）。
+  // botId 取 key 上绑定的机器人；为空则用账号默认机器人（见 deliver.js）
   const r = await deliver(env, {
     userId: row.user_id,
+    botId: row.bot_id,
     keyId: row.id,
     keyName: row.name || '',
     title,

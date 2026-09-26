@@ -1,0 +1,26 @@
+# 构建上下文瘦身：镜像里的依赖一律在构建阶段 npm ci 装，宿主机的 node_modules 绝不能被拷进去
+# （darwin/arm64 上的二进制依赖在 alpine/x86 运行时里直接跑不起来）。
+.git
+.gitignore
+.github
+**/node_modules
+**/dist
+.workbuddy/
+
+# 密钥与线上数据导出：一次都没进过镜像的必要条件
+**/.env
+**/.env.*
+!**/.env.example
+worker/.d1-export/
+worker/migrations/
+worker/wrangler.toml
+**/.wrangler
+**/.dev.vars
+
+# 只有 Dockerfile 那一层需要 worker/src 与 pages/；其余都是仓库文档/工具
+README.md
+docs/
+scripts/
+docker-compose.yml
+Dockerfile
+.dockerignore

@@ -1,10 +1,20 @@
-// Worker 入口：路由 + CORS
+// Worker 入口：路由表 + CORS + Cron 触发
+//
+// 路由写成一张表（method + 正则 + 处理函数），而不是一长串 if：
+//   1) 加一条路由只有一行，不会再出现「处理函数写好了、路由忘了挂」这类只报 404 的隐形故障
+//      （2026-09-10 的 PUT /api/keys/:id 就是这么丢的，线上一直 404 谁都没发现）；
+//   2) 鉴权在表的外层统一处理（public: true 才放行免登录），不会漏写；
+//   3) 处理函数统一收一个 ctx（request/env/ctx/origin/url/正则捕获/uid），签名一致、好读。
 import { json } from './utils.js';
 import { register, login, changePassword, verifyJWT } from './auth.js';
 import { createKey, listKeys, updateKey, deleteKey } from './keys.js';
 import { listNotifications, getNotification, markRead, deleteNotification, clearNotifications } from './notifications.js';
 import { handleWebhook } from './webhook.js';
-import { handleCallback, getBotConfigView, updateBotConfig, testBotConfig } from './qq.js';
+import {
+  handleCallback,
+  listBots, createBot, updateBot, deleteBot, testBot, removeBotTarget,
+  legacyGetConfig, legacyUpdateConfig, legacyTestBot,
+} from './bots.js';
 import { listJobs, createJob, updateJob, deleteJob, runDueJobs } from './jobs.js';
 
 async function getUserId(request, env) {
@@ -14,142 +24,86 @@ async function getUserId(request, env) {
   return payload ? payload.sub : null;
 }
 
-function requireAuth(userId) {
-  if (!userId) return json({ error: 'unauthorized' }, 401);
-  return null;
-}
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+};
+
+// 路由表：按顺序匹配，第一个命中者胜出。
+//   handler 收 ctx = { request, env, ctx, url, origin, m（正则捕获）, uid }
+//   origin 是回给控制台拼回调地址用的（机器人回调 URL 里含域名，写死会在换域后失效）
+const ROUTES = [
+  /* ---------------- 公开路由（public: true，不鉴权） ---------------- */
+  // 通用 webhook：任意来源推消息的入口，靠 URL 里的 key 自证身份
+  { method: 'GET', pattern: /^\/hook\/([\w-]+)$/, public: true, handler: (c) => handleWebhook(c.request, c.env, c.m[1]) },
+  { method: 'POST', pattern: /^\/hook\/([\w-]+)$/, public: true, handler: (c) => handleWebhook(c.request, c.env, c.m[1]) },
+  // QQ 平台事件回调：公开路由，靠 Ed25519 验签保证来源可信（地址在开放平台管理端配置，必须稳定）
+  { method: 'POST', pattern: /^\/api\/qq\/callback$/, public: true, handler: (c) => handleCallback(c.request, c.env, c.ctx, c.origin) },
+  { method: 'POST', pattern: /^\/api\/register$/, public: true, handler: (c) => register(c.request, c.env) },
+  { method: 'POST', pattern: /^\/api\/login$/, public: true, handler: (c) => login(c.request, c.env) },
+
+  /* ---------------- 账号 ---------------- */
+  { method: 'POST', pattern: /^\/api\/password$/, handler: (c) => changePassword(c.request, c.env, c.uid) },
+
+  /* ---------------- 机器人（账号隔离：每账号可接多个，各自绑定 key / 定时任务） ---------------- */
+  { method: 'GET', pattern: /^\/api\/bots$/, handler: (c) => listBots(c.request, c.env, c.uid, c.origin) },
+  { method: 'POST', pattern: /^\/api\/bots$/, handler: (c) => createBot(c.request, c.env, c.uid, c.origin) },
+  // 固定子路径必须排在 /:id 之前（两者不冲突，但读起来顺序一致）
+  { method: 'POST', pattern: /^\/api\/bots\/(\d+)\/test$/, handler: (c) => testBot(c.request, c.env, c.uid, c.m[1]) },
+  { method: 'DELETE', pattern: /^\/api\/bots\/(\d+)\/targets$/, handler: (c) => removeBotTarget(c.request, c.env, c.uid, c.m[1]) },
+  { method: 'PUT', pattern: /^\/api\/bots\/(\d+)$/, handler: (c) => updateBot(c.request, c.env, c.uid, c.m[1], c.origin) },
+  { method: 'DELETE', pattern: /^\/api\/bots\/(\d+)$/, handler: (c) => deleteBot(c.request, c.env, c.uid, c.m[1]) },
+
+  // 旧接口兼容：重构前「一个账号一份机器人配置」，现在等价于「账号默认机器人」。
+  // 保留是为了已经发布的客户端（安卓端配置页）不直接 404；新代码请用 /api/bots。
+  { method: 'GET', pattern: /^\/api\/qq\/config$/, handler: (c) => legacyGetConfig(c.request, c.env, c.uid, c.origin) },
+  { method: 'PUT', pattern: /^\/api\/qq\/config$/, handler: (c) => legacyUpdateConfig(c.request, c.env, c.uid, c.origin) },
+  { method: 'POST', pattern: /^\/api\/qq\/test$/, handler: (c) => legacyTestBot(c.request, c.env, c.uid) },
+
+  /* ---------------- key 管理 ---------------- */
+  { method: 'POST', pattern: /^\/api\/keys$/, handler: (c) => createKey(c.request, c.env, c.uid) },
+  { method: 'GET', pattern: /^\/api\/keys$/, handler: (c) => listKeys(c.request, c.env, c.uid) },
+  { method: 'PUT', pattern: /^\/api\/keys\/([\w-]+)$/, handler: (c) => updateKey(c.request, c.env, c.uid, c.m[1]) },
+  { method: 'DELETE', pattern: /^\/api\/keys\/([\w-]+)$/, handler: (c) => deleteKey(c.request, c.env, c.uid, c.m[1]) },
+
+  /* ---------------- 通知（?key_id= 按外部 key 过滤、?job_id= 按定时任务过滤） ---------------- */
+  { method: 'GET', pattern: /^\/api\/notifications$/, handler: (c) => listNotifications(c.request, c.env, c.uid) },
+  // 批量清空必须带 ?key_id= 或 ?job_id=（不提供清空全部）
+  { method: 'DELETE', pattern: /^\/api\/notifications$/, handler: (c) => clearNotifications(c.request, c.env, c.uid) },
+  { method: 'POST', pattern: /^\/api\/notifications\/(\d+)\/read$/, handler: (c) => markRead(c.request, c.env, c.uid, c.m[1]) },
+  { method: 'GET', pattern: /^\/api\/notifications\/(\d+)$/, handler: (c) => getNotification(c.request, c.env, c.uid, c.m[1]) },
+  { method: 'DELETE', pattern: /^\/api\/notifications\/(\d+)$/, handler: (c) => deleteNotification(c.request, c.env, c.uid, c.m[1]) },
+
+  /* ---------------- 定时任务（配置在服务端，执行由 Cron 完成；端侧零定时器） ---------------- */
+  { method: 'GET', pattern: /^\/api\/jobs$/, handler: (c) => listJobs(c.request, c.env, c.uid) },
+  { method: 'POST', pattern: /^\/api\/jobs$/, handler: (c) => createJob(c.request, c.env, c.uid) },
+  { method: 'PUT', pattern: /^\/api\/jobs\/(\d+)$/, handler: (c) => updateJob(c.request, c.env, c.uid, c.m[1]) },
+  { method: 'DELETE', pattern: /^\/api\/jobs\/(\d+)$/, handler: (c) => deleteJob(c.request, c.env, c.uid, c.m[1]) },
+];
 
 export default {
   async fetch(request, env, ctx) {
-    const { pathname } = new URL(request.url);
-
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-        },
-      });
+      return new Response(null, { status: 204, headers: CORS });
     }
 
-    // ---- 通用 webhook（无需鉴权）----
-    const m = pathname.match(/^\/hook\/([\w-]+)$/);
-    if (m && (request.method === 'GET' || request.method === 'POST')) {
-      return handleWebhook(request, env, m[1]);
+    const url = new URL(request.url);
+    for (const route of ROUTES) {
+      if (route.method !== request.method) continue;
+      const m = url.pathname.match(route.pattern);
+      if (!m) continue;
+
+      const c = { request, env, ctx, url, origin: url.origin, m, uid: null };
+      if (!route.public) {
+        c.uid = await getUserId(request, env);
+        if (!c.uid) return json({ error: 'unauthorized' }, 401);
+      }
+      return route.handler(c);
     }
 
-    if (pathname.startsWith('/api/')) {
-      const p = pathname.replace('/api', '');
-
-      // QQ 官方机器人回调（公开路由，Ed25519 验签；配置在开放平台管理端）
-      if (p === '/qq/callback' && request.method === 'POST') {
-        return handleCallback(request, env, ctx);
-      }
-
-      // QQ 机器人配置（Web 控制台「机器人」页；settings 优先，env/secret 兜底）
-      if (p === '/qq/config' && request.method === 'GET') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return getBotConfigView(request, env, uid);
-      }
-      if (p === '/qq/config' && request.method === 'PUT') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return updateBotConfig(request, env, uid);
-      }
-      if (p === '/qq/test' && request.method === 'POST') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return testBotConfig(request, env, uid);
-      }
-
-      // 账号
-      if (p === '/register' && request.method === 'POST') return register(request, env);
-      if (p === '/login' && request.method === 'POST') return login(request, env);
-      if (p === '/password' && request.method === 'POST') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return changePassword(request, env, uid);
-      }
-
-      // key 管理
-      if (p === '/keys' && request.method === 'POST') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return createKey(request, env, uid);
-      }
-      if (p === '/keys' && request.method === 'GET') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return listKeys(request, env, uid);
-      }
-      // PUT 必须排在 DELETE 之前（两种方法互不干扰，但保持读起来一致的顺序）
-      if (p.startsWith('/keys/') && request.method === 'PUT') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return updateKey(request, env, uid, p.split('/')[2]);
-      }
-      if (p.startsWith('/keys/') && request.method === 'DELETE') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return deleteKey(request, env, uid, p.split('/')[2]);
-      }
-
-      // 通知（支持 ?key_id= 按外部 key 过滤、?job_id= 按定时任务过滤，供历史查询）
-      if (p === '/notifications' && request.method === 'GET') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return listNotifications(request, env, uid);
-      }
-      // 批量清空历史：必须带 ?key_id= 或 ?job_id=（不提供清空全部）
-      if (p === '/notifications' && request.method === 'DELETE') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return clearNotifications(request, env, uid);
-      }
-      if (p.startsWith('/notifications/') && p.endsWith('/read') && request.method === 'POST') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return markRead(request, env, uid, p.split('/')[2]);
-      }
-      if (p.startsWith('/notifications/') && request.method === 'GET') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return getNotification(request, env, uid, p.split('/')[2]);
-      }
-      if (p.startsWith('/notifications/') && request.method === 'DELETE') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return deleteNotification(request, env, uid, p.split('/')[2]);
-      }
-
-      // 定时任务（配置在服务端，执行由 Cron 完成；端侧只做 CRUD，不需要任何定时器）
-      if (p === '/jobs' && request.method === 'GET') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return listJobs(request, env, uid);
-      }
-      if (p === '/jobs' && request.method === 'POST') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return createJob(request, env, uid);
-      }
-      if (p.startsWith('/jobs/') && request.method === 'PUT') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return updateJob(request, env, uid, p.split('/')[2]);
-      }
-      if (p.startsWith('/jobs/') && request.method === 'DELETE') {
-        const uid = await getUserId(request, env);
-        const e = requireAuth(uid); if (e) return e;
-        return deleteJob(request, env, uid, p.split('/')[2]);
-      }
-
-      return json({ error: 'not found' }, 404);
-    }
-
+    // /api/* 下的未注册路径只回通用 404；其他路径带上服务名，便于区分「打到别的服务了」
+    if (url.pathname.startsWith('/api/')) return json({ error: 'not found' }, 404);
     return json({ error: 'not found', service: 'notify-hub' }, 404);
   },
 

@@ -26,9 +26,9 @@ export async function listNotifications(request, env, userId) {
 
   const rows = await env.DB.prepare(
     `SELECT n.id, n.key_id, n.job_id, k.name AS key_name, n.title, n.body, n.payload,
-            n.rejected, n.created_at, n.read, n.delivered_at
+            n.rejected, n.created_at, n.\`read\`, n.delivered_at
      FROM notifications n
-     LEFT JOIN keys k ON k.id = n.key_id
+     LEFT JOIN \`keys\` k ON k.id = n.key_id
      WHERE ${whereSql}
      ORDER BY n.id DESC LIMIT ? OFFSET ?`
   ).bind(...binds, limit, offset).all();
@@ -47,7 +47,7 @@ export async function getNotification(request, env, userId, id) {
 }
 
 export async function markRead(request, env, userId, id) {
-  await env.DB.prepare('UPDATE notifications SET read=1 WHERE id=? AND user_id=?').bind(id, userId).run();
+  await env.DB.prepare('UPDATE notifications SET `read`=1 WHERE id=? AND user_id=?').bind(id, userId).run();
   return json({ ok: true });
 }
 

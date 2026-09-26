@@ -12,6 +12,7 @@
 import { json, readJson } from './utils.js';
 import { parseSchedule, parseOffset, nextRunAt, describeSchedule, floorMinute } from './schedule.js';
 import { deliver } from './deliver.js';
+import { resolveBotBinding } from './bots.js';
 import { isHoliday, ymdLocal } from './holiday.js';
 
 const MAX_PER_TICK = 100;        // 单 tick 最多执行的 job 数，超出顺延到下一分钟
@@ -82,6 +83,7 @@ async function fireJob(env, job, now) {
   //    jobId=job.id：归属到本任务，任务列表能显示「已发送 N 条」，也能按任务看历史 / 清空。
   await deliver(env, {
     userId: job.user_id,
+    botId: job.bot_id,
     keyId: null,
     jobId: job.id,
     keyName: '',
@@ -111,8 +113,14 @@ async function fireJob(env, job, now) {
 /* ---------------- CRUD ---------------- */
 
 export async function listJobs(request, env, userId) {
+  // LEFT JOIN bots 只为把「推送到哪个机器人」一并带回列表（端侧无需再拉一次机器人列表）；
+  // 条件里带上 user_id 是为了让「绑定的机器人被别人删掉」这类脏数据退化成 NULL（回落默认机器人）
   const rows = await env.DB.prepare(
-    `SELECT * FROM jobs WHERE user_id = ? ORDER BY enabled DESC, next_run_at`
+    `SELECT j.*, b.name AS bot_name
+       FROM jobs j
+       LEFT JOIN bots b ON b.id = j.bot_id AND b.user_id = j.user_id
+      WHERE j.user_id = ?
+      ORDER BY j.enabled DESC, j.next_run_at`
   ).bind(userId).all();
 
   // 每个任务已发出的通知条数（端侧显示「已发送 N 条」）。
@@ -153,16 +161,21 @@ export async function createJob(request, env, userId) {
     return json({ error: `每个账号最多 ${MAX_JOBS_PER_USER} 个定时任务` }, 400);
   }
 
+  // 推送到哪个机器人：不传 = 账号默认机器人（bot_id 为 NULL）
+  const bind = await resolveBotBinding(env, userId, b.bot_id);
+  if (!bind.ok) return json({ error: bind.error }, 400);
+
   const now = Date.now();
   const next = nextRunAt(schedule, offset, now, now);
   // key_id 恒为 NULL：定时任务不挂外部 key。旧版客户端仍会传 key_id，这里直接忽略（不报错）。
   // title 列已废弃（标题一律取任务名称），保留列不写值。
   const skipHoliday = b.skip_holiday ? 1 : 0;
   const res = await env.DB.prepare(
-    `INSERT INTO jobs (user_id, key_id, name, schedule, tz, title, body, enabled, skip_holiday, next_run_at, created_at, updated_at)
-     VALUES (?,NULL,?,?,?,NULL,?,?,?,?,?,?)`
+    `INSERT INTO jobs (user_id, key_id, bot_id, name, schedule, tz, title, body, enabled, skip_holiday, next_run_at, created_at, updated_at)
+     VALUES (?,NULL,?,?,?,?,NULL,?,?,?,?,?,?)`
   ).bind(
     userId,
+    bind.botId,
     name,
     schedule, tz,
     String(b.body || '').slice(0, 8000),
@@ -191,6 +204,14 @@ export async function updateJob(request, env, userId, id) {
   const enabled = b.enabled !== undefined ? (b.enabled ? 1 : 0) : job.enabled;
   const skipHoliday = b.skip_holiday !== undefined ? (b.skip_holiday ? 1 : 0) : job.skip_holiday;
 
+  // 推送机器人：不传保持原绑定（传 null / 空串 = 解绑，回落账号默认机器人）
+  let botId = job.bot_id;
+  if (b.bot_id !== undefined) {
+    const bind = await resolveBotBinding(env, userId, b.bot_id);
+    if (!bind.ok) return json({ error: bind.error }, 400);
+    botId = bind.botId;
+  }
+
   const now = Date.now();
   // 计划变更、或把停用的任务重新启用时，重算下次触发时刻（否则残留的旧时刻会让它立刻补跑一次）
   const reschedule = b.schedule !== undefined || b.tz !== undefined || (enabled === 1 && !job.enabled);
@@ -198,9 +219,9 @@ export async function updateJob(request, env, userId, id) {
 
   // key_id 不参与更新（恒为 NULL）；title 列已废弃，不再写入
   await env.DB.prepare(
-    `UPDATE jobs SET name=?, schedule=?, tz=?, body=?, enabled=?, skip_holiday=?, next_run_at=?, updated_at=?
+    `UPDATE jobs SET name=?, schedule=?, tz=?, body=?, enabled=?, skip_holiday=?, bot_id=?, next_run_at=?, updated_at=?
       WHERE id=? AND user_id=?`
-  ).bind(name, schedule, tz, body, enabled, skipHoliday, next, now, id, userId).run();
+  ).bind(name, schedule, tz, body, enabled, skipHoliday, botId, next, now, id, userId).run();
 
   return json({ ok: true, next_run_at: next, desc: describeSchedule(schedule, tz) });
 }

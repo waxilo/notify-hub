@@ -1,6 +1,6 @@
 // Web 控制台逻辑（仅配置）
-import { API_BASE } from './config.js?v=20260911c';
-import { api, setToken, isLoggedIn } from './api.js?v=20260911j';
+import { API_BASE } from './config.js?v=20260915a';
+import { api, setToken, isLoggedIn } from './api.js?v=20260915a';
 
 
 const $ = (sel) => document.querySelector(sel);
@@ -90,7 +90,7 @@ async function mainView() {
   <div id="modal-root"></div>`;
   $('#tab-keys').onclick = () => switchTab('tab-keys', 'view-keys');
   $('#tab-jobs').onclick = () => { switchTab('tab-jobs', 'view-jobs'); renderJobs(); };
-  $('#tab-qqbot').onclick = () => { switchTab('tab-qqbot', 'view-qqbot'); renderQQBot(); };
+  $('#tab-qqbot').onclick = () => { switchTab('tab-qqbot', 'view-qqbot'); renderBots(); };
   $('#tab-docs').onclick = () => { switchTab('tab-docs', 'view-docs'); renderDocs(); };
   $('#tab-acct').onclick = () => { switchTab('tab-acct', 'view-acct'); renderAccount(); };
   $('#logout').onclick = () => { setToken(null); authView(); };
@@ -103,9 +103,9 @@ function switchTab(tabId, viewId) {
   ['view-keys', 'view-jobs', 'view-qqbot', 'view-docs', 'view-acct'].forEach((v) => { $('#' + v).hidden = v !== viewId; });
 }
 
-/* ---------- QQ 机器人 ---------- */
+/* ---------- 机器人（账号隔离：每账号可接多个，其中一个为默认） ---------- */
 
-const QQ_TARGET_LABEL = { group: 'QQ 群', c2c: 'QQ 私聊', both: '群 + 私聊都发' };
+const BOT_TARGET_LABEL = { group: 'QQ 群', c2c: 'QQ 私聊', both: '群 + 私聊都发' };
 
 // 名单渲染：有绑定显示 chip（code + 移除按钮），无绑定显示引导文案
 const bindList = (items, kind, emptyText) => (items || []).length
@@ -114,56 +114,95 @@ const bindList = (items, kind, emptyText) => (items || []).length
     ).join(' ')
   : `<b class="warn">未绑定</b> —— ${emptyText}`;
 
-async function renderQQBot() {
+// 单个机器人的卡片：凭证表单 + 推送名单 + 回调地址。每个机器人各自独立，改动互不影响。
+function botCard(b, defaultTpl) {
+  return `
+  <div class="card" data-bot="${b.id}">
+    <div class="card-head">
+      <h2>${escapeHtml(b.name || '未命名机器人')}
+        ${b.is_default ? '<span class="badge on">默认</span>' : ''}
+        <span class="badge mode">${BOT_TARGET_LABEL[b.target] || escapeHtml(b.target)}</span>
+      </h2>
+      <span>
+        ${b.is_default ? '' : `<button class="btn mini" data-mkdefault="${b.id}">设为默认</button>`}
+        <button class="btn mini" data-test="${b.id}">测试连接</button>
+        <button class="btn mini danger" data-del="${b.id}">删除</button>
+      </span>
+    </div>
+    <form data-form="${b.id}">
+      <label>名称<input name="name" value="${escapeHtml(b.name || '')}" placeholder="如：私人机器人 / 运维机器人" /></label>
+      <label>AppID<input name="app_id" value="${escapeHtml(b.app_id || '')}" placeholder="机器人 AppID" autocomplete="off" /></label>
+      <label>AppSecret<input type="password" name="app_secret" value="" placeholder="${b.has_secret ? `已配置（${escapeHtml(b.secret_masked)}），留空保持不变` : '尚未配置'}" autocomplete="new-password" /></label>
+      <label>触达目标
+        <select name="target">
+          <option value="c2c" ${b.target === 'c2c' ? 'selected' : ''}>QQ 私聊（加好友后私聊机器人完成绑定）</option>
+          <option value="group" ${b.target === 'group' ? 'selected' : ''}>QQ 群（群里 @机器人 完成绑定）</option>
+          <option value="both" ${b.target === 'both' ? 'selected' : ''}>群 + 私聊都发</option>
+        </select>
+      </label>
+      <label>消息模板</label>
+      <textarea name="msg_template" rows="5" spellcheck="false" placeholder="${escapeHtml(defaultTpl)}">${escapeHtml(b.msg_template || '')}</textarea>
+      <p class="hint xs">占位符：<code>{title}</code> 通知标题（任务名 / key 名）、<code>{body}</code> 正文、<code>{time}</code> 发送时间。<b>留空 = 用上面的默认模板</b>。QQ 文本消息仅支持纯文本排版。</p>
+      <div class="modal-actions" style="display:flex;gap:8px">
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+      <p class="msg" data-msg="${b.id}"></p>
+    </form>
+    <h3 style="margin:14px 0 6px;font-size:13px">推送名单（openid 自动捕获，多群 / 多好友扇出）</h3>
+    <p class="hint">QQ 群：${bindList(b.group_openids, 'group', '把机器人拉进群，在群里 @它 说句话')}</p>
+    <p class="hint">QQ 私聊：${bindList(b.user_openids, 'c2c', '加机器人为好友，私聊它发一句话')}</p>
+    <p class="hint xs">谁来 @ / 私聊过这个机器人，谁就会进它的名单，推送时逐个发送；不需要接收的点击 × 移除。</p>
+    <p class="hint xs">开放平台管理端需把该机器人的回调地址设为（WebHook 模式）：
+      <code>${escapeHtml(b.callback_url)}</code>
+      <button class="btn mini" data-copy="${escapeHtml(b.callback_url)}">复制</button>
+    </p>
+  </div>`;
+}
+
+async function renderBots() {
   const view = $('#view-qqbot');
   view.innerHTML = '<div class="card"><p class="hint">加载中…</p></div>';
-  let c;
+  let data;
   try {
-    c = await api.getQQConfig();
+    data = await api.listBots();
   } catch (err) {
     view.innerHTML = `<div class="card"><p class="msg">加载失败：${escapeHtml(err.message)}</p></div>`;
     return;
   }
+  const bots = data.bots || [];
+  const atLimit = bots.length >= (data.max || 10);
 
   view.innerHTML = `
     <div class="card">
-      <h2>机器人凭证</h2>
-      <p class="hint">还没有机器人？先去 <a href="https://q.qq.com/qqbot/dashboard/" target="_blank" rel="noopener">QQ 机器人管理端</a> 创建：<b>① 扫码登录 → ② 创建机器人</b>（个人身份证认证即可，龙虾私人机器人也走这里）→ <b>③ 开发设置里拿 AppID / AppSecret</b>（Secret 只显示一次，先复制好）→ ④ 回本页填写。</p>
-      <form id="qq-form">
-        <label>AppID<input name="app_id" value="${escapeHtml(c.app_id || '')}" placeholder="机器人 AppID" autocomplete="off" /></label>
-        <label>AppSecret<input type="password" name="app_secret" value="" placeholder="${c.has_secret ? `已配置（${escapeHtml(c.secret_masked)}），留空保持不变` : '尚未配置'}" autocomplete="new-password" /></label>
-        <label>触达目标
-          <select name="target">
-            <option value="c2c" ${c.target === 'c2c' ? 'selected' : ''}>QQ 私聊（加好友后私聊机器人完成绑定）</option>
-            <option value="group" ${c.target === 'group' ? 'selected' : ''}>QQ 群（群里 @机器人 完成绑定）</option>
-            <option value="both" ${c.target === 'both' ? 'selected' : ''}>群 + 私聊都发</option>
-          </select>
-        </label>
-        <p class="hint xs">当前目标：<b>${QQ_TARGET_LABEL[c.target] || escapeHtml(c.target)}</b>。此处配置的凭证优先于服务端 env/secret（env 兜底）。</p>
-        <label>消息模板</label>
-        <textarea name="msg_template" rows="6" spellcheck="false">${escapeHtml(c.msg_template || '')}</textarea>
-        <p class="hint xs">推送文本按此模板渲染，支持占位符：<code>{title}</code> 通知标题（任务名 / key 名）、<code>{body}</code> 正文、<code>{time}</code> 发送时间。清空保存 = 恢复默认模板。QQ 文本消息仅支持纯文本排版。</p>
-        <div class="modal-actions" style="display:flex;gap:8px">
-          <button type="submit" class="btn primary">保存配置</button>
-          <button type="button" class="btn" id="qq-test">测试连接</button>
-        </div>
-        <p class="msg" id="qq-msg"></p>
-      </form>
+      <div class="card-head">
+        <h2>接入了 ${bots.length} 个机器人</h2>
+        <button class="btn primary" id="btn-new-bot" ${atLimit ? 'disabled' : ''}>＋ 新建机器人</button>
+      </div>
+      <p class="hint" style="margin-top:-6px">
+        <b>机器人是按账号隔离的</b>：这里的凭证、推送名单、消息模板都只属于你自己的账号，别的账号改不动、也看不见。
+        还没有机器人？先去 <a href="https://q.qq.com/qqbot/dashboard/" target="_blank" rel="noopener">QQ 机器人管理端</a>
+        创建（<b>① 扫码登录 → ② 创建机器人</b>，个人身份证认证即可；龙虾私人机器人也走这里）→
+        <b>③ 开发设置里拿 AppID / AppSecret</b>（Secret 只显示一次，先复制好）→ 回来点「新建机器人」填入。
+      </p>
+      <p class="hint xs">
+        多个机器人的用法：一个账号可以各接一个「私人机器人 / 运维机器人」，
+        再在「Key 管理」和「定时任务」里指定每个 key / 任务用哪个机器人推送（不指定就走<b>默认机器人</b>）。
+        ${atLimit ? `<b class="warn">已达上限 ${data.max} 个</b>` : ''}
+      </p>
     </div>
-    <div class="card">
-      <h2>推送名单（openid 自动捕获，多群 / 多好友扇出）</h2>
-      <p class="hint">QQ 群：${bindList(c.group_openids, 'group', '把机器人拉进群，在群里 @它 说句话')}</p>
-      <p class="hint">QQ 私聊：${bindList(c.user_openids, 'c2c', '加机器人为好友，私聊它发一句话')}</p>
-      <p class="hint xs">每个私聊过机器人 / @过机器人的目标都会<b>自动加入名单</b>（不覆盖已有绑定），推送时逐个发送、人人都能收到。不需要接收的点击 × 移除即可。</p>
-      <p class="hint xs">开放平台管理端需已切换为 <b>WebHook 模式</b>，回调地址填：<code>${escapeHtml(API_BASE)}/api/qq/callback</code>（URL 验证按官方算法自动完成）。</p>
-    </div>`;
+    ${bots.length ? bots.map((b) => botCard(b, data.default_msg_template || '')).join('') : `
+    <div class="card"><div class="empty">还没有接入机器人，点击右上角「＋ 新建机器人」开始（填入 AppID / AppSecret 后即可推送）</div></div>`}`;
 
+  if ($('#btn-new-bot') && !atLimit) $('#btn-new-bot').onclick = () => createBot();
+
+  // 名单移除：DELETE /api/bots/:id/targets
   view.querySelectorAll('button.unbind').forEach((btn) => {
     btn.onclick = async () => {
+      const card = btn.closest('[data-bot]');
       btn.disabled = true;
       try {
-        await api.unbindQQ(btn.dataset.kind, btn.dataset.openid);
-        renderQQBot();
+        await api.unbindBotTarget(card.dataset.bot, btn.dataset.kind, btn.dataset.openid);
+        renderBots();
       } catch (err) {
         btn.disabled = false;
         alert('移除失败：' + err.message);
@@ -171,33 +210,89 @@ async function renderQQBot() {
     };
   });
 
-  const form = $('#qq-form');
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    const F = form.elements;   // 不用 form.xxx：name 与 IDL 属性重名时 form.name 会返回表单自身特性
-    const body = { target: F.target.value, msg_template: F.msg_template.value };
-    if (F.app_id.value.trim()) body.app_id = F.app_id.value.trim();
-    if (F.app_secret.value) body.app_secret = F.app_secret.value;
-    const msg = $('#qq-msg');
-    msg.textContent = '';
-    try {
-      await api.updateQQConfig(body);
-      msg.textContent = '已保存，立即生效';
-      renderQQBot();
-    } catch (err) {
-      msg.textContent = err.message;
-    }
+  view.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b); });
+
+  view.querySelectorAll('[data-mkdefault]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try { await api.updateBot(b.dataset.mkdefault, { is_default: true }); renderBots(); }
+      catch (err) { b.disabled = false; alert('设置失败：' + err.message); }
+    };
+  });
+  view.querySelectorAll('[data-test]').forEach((b) => {
+    b.onclick = async () => {
+      const msg = view.querySelector(`[data-msg="${b.dataset.test}"]`);
+      if (msg) msg.textContent = '正在测试（真实换取一次 access_token）…';
+      try {
+        const r = await api.testBot(b.dataset.test);
+        if (msg) msg.textContent = r.ok ? '✓ 连接成功：凭证有效' : `✗ 连接失败：${r.error || '未知错误'}`;
+      } catch (err) { if (msg) msg.textContent = err.message; }
+    };
+  });
+  view.querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = () => openBotDelete(bots.find((x) => String(x.id) === b.dataset.del));
+  });
+  view.querySelectorAll('[data-form]').forEach((form) => {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      // 同 key 编辑弹窗：不能用 form.xxx 取值（name 属性与表单 IDL 属性重名）
+      const F = form.elements;
+      const id = form.dataset.form;
+      const msg = view.querySelector(`[data-msg="${id}"]`);
+      if (msg) msg.textContent = '';
+      const body = { name: F.name.value.trim(), target: F.target.value, msg_template: F.msg_template.value };
+      // app_id 传空串 = 清除；app_secret 留空 = 保持不变（服务端语义）
+      body.app_id = F.app_id.value.trim();
+      if (F.app_secret.value) body.app_secret = F.app_secret.value;
+      try {
+        await api.updateBot(id, body);
+        renderBots();
+      } catch (err) { if (msg) msg.textContent = err.message; }
+    };
+  });
+}
+
+// 新建：直接建一个占位机器人再让用户填卡片 —— 比弹窗少一层交互，且「填错了」可以就地改
+async function createBot() {
+  try {
+    const r = await api.createBot({ name: '新机器人' });
+    await renderBots();
+    const card = document.querySelector(`[data-bot="${r.bot.id}"]`);
+    const first = card && card.querySelector('input[name=app_id]');
+    if (first) { first.focus(); card.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  } catch (err) { alert('新建失败：' + err.message); }
+}
+
+function openBotDelete(bot) {
+  if (!bot) return;
+  const root_ = $('#modal-root');
+  root_.innerHTML = `
+  <div class="modal-mask">
+    <div class="modal card">
+      <h2>删除机器人「${escapeHtml(bot.name)}」</h2>
+      <p class="hint">将删除这个机器人的凭证与<b>全部推送名单</b>（${(bot.group_openids || []).length} 个群 / ${(bot.user_openids || []).length} 个好友）。</p>
+      <p class="hint">绑过它的 key 与定时任务会自动改为「跟随默认机器人」，不会失效。${bot.is_default ? '这是当前的<b>默认机器人</b>，删除后会把剩下的第一个顶上来。' : ''}</p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="botdel-cancel">取消</button>
+        <button type="button" class="btn primary danger" id="botdel-confirm">确认删除</button>
+      </div>
+      <p class="msg" id="botdel-msg"></p>
+    </div>
+  </div>`;
+  $('#botdel-cancel').onclick = () => { root_.innerHTML = ''; };
+  $('#botdel-confirm').onclick = async () => {
+    try { await api.deleteBot(bot.id); root_.innerHTML = ''; renderBots(); }
+    catch (err) { $('#botdel-msg').textContent = err.message; }
   };
-  $('#qq-test').onclick = async () => {
-    const msg = $('#qq-msg');
-    msg.textContent = '正在测试（真实换取一次 access_token）…';
-    try {
-      const r = await api.testQQ();
-      msg.textContent = r.ok ? '✓ 连接成功：凭证有效' : `✗ 连接失败：${r.error || '未知错误'}`;
-    } catch (err) {
-      msg.textContent = err.message;
-    }
-  };
+}
+
+// 机器人下拉（key / 定时任务的编辑弹窗共用）：空值 = 跟随账号默认机器人
+function botOptions(bots, selectedId, defaultName) {
+  const opts = [`<option value="" ${selectedId ? '' : 'selected'}>跟随默认机器人${defaultName ? `（${escapeHtml(defaultName)}）` : ''}</option>`];
+  for (const b of bots || []) {
+    opts.push(`<option value="${b.id}" ${String(selectedId) === String(b.id) ? 'selected' : ''}>${escapeHtml(b.name || '机器人 ' + b.id)}${b.is_default ? '（默认）' : ''}</option>`);
+  }
+  return opts.join('');
 }
 
 /* ---------- 接入文档 ---------- */
@@ -252,7 +347,7 @@ requests.post('${API_BASE}/hook/<KEY>', json={
       <div class="doc-code"><code>${escapeHtml(samples[0])}</code><button class="btn mini doc-copy">复制</button></div>
       <p class="hint">或用 curl：</p>
       <div class="doc-code"><code>${escapeHtml(samples[1])}</code><button class="btn mini doc-copy">复制</button></div>
-      <p class="hint">通知经 QQ 官方机器人推送到绑定的 QQ 群；网关失败时消息仍入库（历史显示「未送达」），不会丢失。</p>
+      <p class="hint">通知经<b>你自己接入的 QQ 机器人</b>推送到它绑定的群 / 好友（在「机器人」页接入，按账号隔离）；网关失败时消息仍入库（历史显示「未送达」），不会丢失。</p>
     </div>
 
     <div class="card doc-card">
@@ -374,6 +469,7 @@ async function loadList() {
           <button class="key-more" data-more="${k.id}" aria-label="操作菜单">⋯</button>
         </div>
         <div class="key-sub">
+          <span class="hint">推送机器人：<b>${escapeHtml(k.bot_name || '默认机器人')}</b></span>
           <span class="hint">最近使用：${k.last_used ? new Date(k.last_used).toLocaleString() : '从未使用'}</span>
         </div>
       </div>`).join('')}</div>`;
@@ -452,9 +548,13 @@ function openKeyDelete(k) {
   };
 }
 
-// key 编辑弹窗：名称 / 启停
-function openKeyEdit(k) {
+// key 编辑弹窗：名称 / 启停 / 模式 / 推送机器人
+async function openKeyEdit(k) {
   const root_ = $('#modal-root');
+  // 机器人下拉需要本账号的机器人列表；拉不到就不显示这一项，不挡住 key 的编辑
+  let bots = [];
+  try { bots = (await api.listBots()).bots || []; } catch { /* 忽略 */ }
+  const defBot = bots.find((b) => b.is_default);
   root_.innerHTML = `
   <div class="modal-mask">
     <div class="modal card">
@@ -462,6 +562,9 @@ function openKeyEdit(k) {
       <form id="edit-form">
         <label>名称</label>
         <input name="name" value="${escapeHtml(k.name)}" required />
+        <label>推送机器人</label>
+        <select name="bot_id">${botOptions(bots, k.bot_id, defBot && defBot.name)}</select>
+        <p class="hint">这个 key 收到的通知推给哪个机器人（凭证与推送名单都跟着走）。没有机器人时先到「机器人」页接入。</p>
         <label>推送模式</label>
         <div class="seg">
           <label class="seg-item"><input type="radio" name="mode" value="default" ${k.mode !== 'custom' ? 'checked' : ''}/><span>默认</span></label>
@@ -493,6 +596,7 @@ function openKeyEdit(k) {
     try {
       await api.updateKey(k.id, {
         name: F.name.value.trim(),
+        bot_id: F.bot_id.value,          // 空串 = 解绑，跟随账号默认机器人
         active: F.active.checked,
         mode: F.mode.value,
         template: F.mode.value === 'custom' ? F.template.value : '',
@@ -581,6 +685,7 @@ async function loadJobs() {
         </div>
         <div class="key-sub">
           <span class="hint">通知内容：${escapeHtml(j.body || '（与任务名称相同）')}</span>
+          <span class="hint">推送机器人：<b>${escapeHtml(j.bot_name || '默认机器人')}</b></span>
         </div>
         <div class="key-sub">
           <span class="hint">下次执行：${j.enabled ? fmtTime(j.next_run_at) : '（已停用）'}</span>
@@ -623,14 +728,19 @@ async function loadJobs() {
 }
 
 // 新建 / 编辑弹窗（job 为空即新建）
-// 定时任务不选通道：它不属于任何外部 key，直接发「默认类型」通知 —— 标题固定为任务名称。
-function openJobEdit(job) {
+// 定时任务不选通道：它不属于任何外部 key，直接发「默认类型」通知 —— 标题固定为任务名称；
+// 可选的是「推给哪个机器人」（空 = 跟随账号默认机器人）。
+async function openJobEdit(job) {
   const isNew = !job;
   const sc = splitSchedule(job && job.schedule);
   const tz = (job && job.tz) || localTz();
   const root_ = $('#modal-root');
   // 处于停用状态时直接展开高级设置，避免用户以为配置丢了
   const needAdv = !!job && !job.enabled;
+  // 机器人下拉需要本账号的机器人列表；拉不到就不显示这一项
+  let bots = [];
+  try { bots = (await api.listBots()).bots || []; } catch { /* 忽略 */ }
+  const defBot = bots.find((b) => b.is_default);
 
   root_.innerHTML = `
   <div class="modal-mask">
@@ -676,6 +786,10 @@ function openJobEdit(job) {
 
         <label>通知内容</label>
         <input name="body" value="${escapeHtml((job && job.body) || '')}" placeholder="留空则与任务名称相同" />
+
+        <label>推送机器人</label>
+        <select name="bot_id">${botOptions(bots, job && job.bot_id, defBot && defBot.name)}</select>
+        <p class="hint xs" style="margin:6px 0 0">这个任务触发后推给哪个机器人（凭证与推送名单都跟着走）。没有机器人时先到「机器人」页接入。</p>
 
         <label class="check-row" style="margin-top:10px"><input type="checkbox" name="skip_holiday" ${job && job.skip_holiday ? 'checked' : ''}/> 跳过节假日（当天为非工作日时不触发，仅周期型任务生效）</label>
 
@@ -778,6 +892,7 @@ function openJobEdit(job) {
       body: F.body.value,
       schedule,
       tz,
+      bot_id: F.bot_id.value,          // 空串 = 跟随账号默认机器人
       enabled: F.enabled.checked,
       skip_holiday: F.skip_holiday.checked,
     };
