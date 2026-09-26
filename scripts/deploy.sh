@@ -59,10 +59,20 @@ port=$(sed -n 's/^APP_PORT=//p' .env | head -1)
 echo ""
 echo "✅ 部署完成： http://${bind:-127.0.0.1}:${port:-8788}   （健康检查：${status}）"
 
-# 公网入口由共享的 ../gw 提供：网关上有本域名的 vhost 才算接入
-if [ -f ../gw/conf.d/notify-hub-worker.conf ]; then
+# 公网入口由共享的 ../gw 提供：网关上有这个域名的 vhost 才算接入。
+# 名字逐个探，因为 Worker 时代的 -worker 与现在的短域名可能只存在其中一个。
+for host in notify-hub.sloan.dpdns.org notify-hub-worker.sloan.dpdns.org; do
+  conf="../gw/conf.d/${host%%.*}.conf"
+  [ -f "$conf" ] || continue
   gw_state=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' gw 2>/dev/null || echo 未启动)
-  echo "   公网入口： https://notify-hub-worker.sloan.dpdns.org   （网关 gw：${gw_state}）"
-fi
+  # 真探一次上游：必须从网关容器里发，宿主机发布的端口在容器网络里连不通，
+  # 而本机 curl 会被 /etc/hosts 的接管行骗过去（照样「通」，但通的是本机网关）。
+  if up=$(docker exec gw wget -qO- -T 5 "http://notify-hub:8787/healthz" 2>&1); then
+    echo "   公网入口： https://${host}   （网关 gw：${gw_state}，上游：${up}）"
+  else
+    echo "   ⚠️ vhost 就位（https://${host}）但网关容器连不上 notify-hub:8787：${up}"
+    echo "      多半是本项目没加入 gw_default 网络 —— 跑 ./scripts/gw-join.sh"
+  fi
+done
 
 [ "$SHOW_LOGS" -eq 1 ] && exec docker compose logs -f

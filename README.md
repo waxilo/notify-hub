@@ -7,7 +7,8 @@
 - **触达通道**：QQ 群消息 / QQ 单聊消息（官方 OpenAPI）。消息一律先入库再推送 —— 推送失败不丢消息，历史里可见「未送达」。
 - **账号隔离**：Key、定时任务、**机器人**全部归属到账号。你的机器人凭证、推送名单、消息模板只有你自己能看到和修改，别的账号既改不动也看不见。
 
-> 服务地址：`https://notify-hub-worker.sloan.dpdns.org`（本机 Docker，经共享网关 `../gw` 出公网）· 数据库：共享容器 `../mysql-server`
+> 服务地址：`https://notify-hub.sloan.dpdns.org`（本机 Docker，经共享网关 `../gw` 出公网）· 数据库：共享容器 `../mysql-server`
+> Worker 时代的 `notify-hub-worker.sloan.dpdns.org` 在网关上**没有 vhost**，写死旧名的端要改地址或补别名 vhost，见「切流量与 Cloudflare 收尾」第 6 步
 
 ---
 
@@ -26,7 +27,7 @@
                          （X-Bot-Appid + Ed25519 验签 → 定位到账号与机器人）
 
         ▲ HTTPS                         
-        │  notify-hub-worker.sloan.dpdns.org          
+        │  notify-hub.sloan.dpdns.org                   
   ┌─────┴──────────────┐  gw_default 网络        ┌────────────────────┐
   │ ../gw 共享网关      │ ──────────────────────▶ │ notify-hub:8787    │
   │ cloudflared 通配    │                         │ (只绑 127.0.0.1)   │
@@ -52,7 +53,7 @@
    - ⚠️ 一个 AppID 只能归属一个账号：已被别人接入的 AppID 会被拒绝（409），否则回调不知道该把 openid 记给谁。
 3. **配置回调 URL**：在该机器人的管理端「沙箱配置」（或正式配置）把回调地址设为（控制台每张机器人卡片上可一键复制）：
    ```
-   https://notify-hub-worker.sloan.dpdns.org/api/qq/callback
+   https://notify-hub.sloan.dpdns.org/api/qq/callback
    ```
    平台做 URL 验证时，本服务按官方算法用 AppSecret 派生 Ed25519 私钥签 `event_ts + plain_token` 并返回 `{plain_token, signature}`；之后所有事件都带 Ed25519 签名（seed = AppSecret 重复填充至 32 字节），服务端验签后才处理。
 4. **绑定触达目标**（openid 由回调自动捕获，存 MySQL `bot_targets`，**记到触发它的那个机器人名下**；多群 / 多好友累积成推送名单，控制台可查看与移除）：
@@ -75,7 +76,7 @@
 ```bash
 ./scripts/db-init.sh      # 一次性：建库建账号 + 建表 + 生成 .env / .env.test（随机强密码）
 ./scripts/deploy.sh       # npm test 闸门 → 构建镜像 → 起容器 → 等健康检查
-./scripts/gw-join.sh      # 可选：把 notify-hub-worker.sloan.dpdns.org 指到本容器
+./scripts/gw-join.sh      # 可选：把 notify-hub.sloan.dpdns.org 指到本容器（不带参数即短域名）
 ```
 
 三步各解决一件事，顺序是有意的：`.env` 不存在时服务拒绝启动（`startup_misconfigured`），所以先 `db-init`；`deploy.sh` 把 `npm test` 放在构建前面，因为三套测试直接跑在真实 MySQL 上（SQL 方言、索引命中、账号隔离、回调验签都在里面），镜像构建本身不跑任何测试；`gw-join.sh` 最后跑，公网入口没接上之前本机也能完整验证。
@@ -142,7 +143,12 @@
    #   切之后：{"status":"ok","database":true}                + cf-ray 仍在        ← 本机容器
    ```
    ⚠️ 别用本机 `curl` 或本机代理判断公网状态：`gw-add-host.sh` 会往 `/etc/hosts` 写这个名字（撤销就删那两行），本机解析到的是 `127.0.0.1`，代理也跟着它 —— 删路由之前就能「验出」容器，纯属假象。
-6. 之后 QQ 开放平台的回调地址、已发布安卓端里的 API 地址**一个字都不用改**（沿用同一个域名，DNS 走 `*.sloan.dpdns.org` 通配记录，Cloudflare 侧零操作）。到 q.qq.com 的机器人配置页把回调 URL **重新保存验证一次** —— 验证请求现在由本机应答，这是唯一能证明公网链路真的通了的地方；同时看控制台「通知」页历史是否连续。
+6. 到 q.qq.com 的机器人配置页把回调 URL **重新保存验证一次** —— 验证请求现在由本机应答，这是唯一能证明公网链路真的通了的地方；同时看控制台「通知」页历史是否连续。
+   ⚠️ **实际落地的 vhost 是短域名 `notify-hub.sloan.dpdns.org`，不是 Worker 时代的 `notify-hub-worker.…`**（`../gw/conf.d/notify-hub.conf` 由 gw 管理端按短域名生成）。原计划「沿用同一个域名、端上一个字都不用改」没有成立：网关按 Host 白名单转发，旧名字现在由 `gw` 应答 `404 gw: no upstream configured`，凡是写死 `-worker` 的 hook 地址、回调 URL、安卓端 API 都收不到。两条路：把配置改成短域名，或补一个别名 vhost（零 DNS 改动，通配记录本来就覆盖它）：
+   ```bash
+   ./scripts/gw-join.sh notify-hub-worker.sloan.dpdns.org
+   ```
+   DNS 侧两种走法都不用操作：隧道带的是 `*.sloan.dpdns.org` 通配记录，Cloudflare 侧零操作。
 7. 下线云上（本次已执行，逐条留下判据）。删除 Worker 会连带删掉那条 `* * * * *` 的 Cron Trigger，所以第 4 步必须排在它后面：
    ```bash
    export HTTPS_PROXY=http://127.0.0.1:7897
@@ -197,7 +203,7 @@ Cloudflare Cron Trigger 在容器里没有对应物，`worker/src/server.js` 用
 
 ```bash
 # GET 一键通知
-curl "https://notify-hub-worker.sloan.dpdns.org/hook/<KEY>?message=CPU 使用率超过 90%"
+curl "https://notify-hub.sloan.dpdns.org/hook/<KEY>?message=CPU 使用率超过 90%"
 
 # POST JSON（支持表单 / 纯文本）
 curl -X POST "https://…/hook/<KEY>" \
