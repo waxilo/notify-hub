@@ -6,7 +6,7 @@
 #
 # 公网入口走同级 ../gw 的共享网关（cloudflared 已带 *.sloan.dpdns.org 通配，
 # 由网关上的 nginx 按 Host 分发）：./scripts/gw-join.sh 把
-# notify-hub-worker.sloan.dpdns.org 指到 notify-hub:8787。应用自己不开公网端口。
+# notify-hub-worker.sloan.dpdns.org 指到 notify-hub:80。应用自己不开公网端口。
 services:
   app:
     build:
@@ -21,11 +21,16 @@ services:
       # 把同一个任务推第二遍（两边的库互不可见，任务级去重拦不住跨库重复）。
       # 只验 HTTP 时：JOBS_TICK_DISABLED=1 ./scripts/deploy.sh
       JOBS_TICK_DISABLED: "${JOBS_TICK_DISABLED:-0}"
-    # 只绑 127.0.0.1，且只发布一个端口：80/443 归 ../gw（公网域名实际由它应答），
-    # 8787 归 writing-assistant。这里换 8788 是为了本机直连调试时端口不撞车；
-    # 网关注入的是容器名:8787，不经过这个映射。
+      # 应用监听端口。约定：容器内一律 80（网关转发用的就是这个号）。
+      PORT: "80"
+    # 容器以非 root 的 `node` 用户跑，默认绑不了 1024 以下的特权端口。这个 sysctl 是
+    # 网络命名空间级、只作用于本容器，把「非特权端口起点」降到 80，不引入常驻特权。
+    sysctls:
+      - net.ipv4.ip_unprivileged_port_start=80
+    # 只绑 127.0.0.1，且只发布一个端口：80/443 归 ../gw（公网域名实际由它应答）。
+    # 宿主这边给 7002 只是本机直连调试的入口号；网关注入的是容器名:80，不经过这个映射。
     ports:
-      - "${APP_BIND_ADDR:-127.0.0.1}:${APP_PORT:-8788}:8787"
+      - "${APP_BIND_ADDR:-127.0.0.1}:${APP_PORT:-7002}:80"
     healthcheck:
       # /healthz 会真的 SELECT 1（探活要连数据库一起探，否则「接口活着、库里连不上」看不出来）。
       # 用 node 而不是 wget/curl：alpine 运行时镜像里只有 node。
@@ -34,7 +39,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:80/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 30s
       timeout: 5s
@@ -44,7 +49,7 @@ services:
       # 共享 MySQL 的网络：库里的主机名就是 `mysql`。
       # 声明为 external —— 本项目不拥有这两个网络，也就不会在 down 时把别人的摘掉。
       - mysql-server_default
-      # 共享公网网关的网络：让它的 nginx 能以 notify-hub:8787 打到本容器。
+      # 共享公网网关的网络：让它的 nginx 能以 notify-hub:80 打到本容器。
       - gw_default
 
 networks:

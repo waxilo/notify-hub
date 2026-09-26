@@ -22,7 +22,7 @@ COPY pages/ ./pages/
 # 运行时唯一需要写的地方是 MySQL。writing-assistant 那边 chown 是因为要在 /build 里 npm prune，
 # 这里没有那个动作。
 USER node
-EXPOSE 8787
+EXPOSE 80
 
 # 不用 docker --init / tini：server.js 自己装了 SIGTERM 处理（先停接单、再等 waitUntil
 # 的尾巴跑完才退），node 作为 PID 1 收到 docker stop 的信号就会走这条路。

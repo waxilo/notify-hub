@@ -29,7 +29,7 @@
         ▲ HTTPS                         
         │  notify-hub.sloan.dpdns.org                   
   ┌─────┴──────────────┐  gw_default 网络        ┌────────────────────┐
-  │ ../gw 共享网关      │ ──────────────────────▶ │ notify-hub:8787    │
+  │ ../gw 共享网关      │ ──────────────────────▶ │ notify-hub:80    │
   │ cloudflared 通配    │                         │ (只绑 127.0.0.1)   │
   │ + nginx 按 Host 分发│                         └─────────┬──────────┘
   └────────────────────┘                                   │ mysql-server_default
@@ -89,8 +89,8 @@
 |---|---|
 | `DB_HOST/PORT/NAME/USER/PASSWORD` | 连哪个库。容器内 `DB_HOST=mysql`（共享容器的服务名），本机直连用 `127.0.0.1:3306` |
 | `JWT_SECRET` | 登录 token 的 HMAC 密钥，≥32 字符。**换掉它 = 安卓端与控制台全部掉线一次** |
-| `TRUST_PROXY` | 经 `../gw` 对外服务时必须 `1`：回调地址由请求 origin 拼出，不信任转发头就会回给 QQ 一个 `http://127.0.0.1:8787` |
-| `APP_BIND_ADDR` / `APP_PORT` | 宿主机端口映射，默认 `127.0.0.1:8788`（8787 是 writing-assistant 的，80/443 是 gw 的） |
+| `TRUST_PROXY` | 经 `../gw` 对外服务时必须 `1`：回调地址由请求 origin 拼出，不信任转发头就会回给 QQ 一个 `http://127.0.0.1:80` |
+| `APP_BIND_ADDR` / `APP_PORT` | 宿主机端口映射，默认 `127.0.0.1:7002`（容器内统一监听 `80`；宿主 `80/443` 归 gw，各应用只占一个回环调试端口 `7001`–`7004`） |
 
 机器人凭证、消息模板、推送名单**都不在 env 里**，一律在控制台「机器人」页配置（存 `bots` / `bot_targets` 表，按账号隔离，改完即时生效）。
 
@@ -128,8 +128,8 @@
 3. 本机验证（HTTP 全通、定时器不装）：
    ```bash
    JOBS_TICK_DISABLED=1 ./scripts/deploy.sh         # 只验接口，不碰 cron
-   curl -s http://127.0.0.1:8788/healthz            # {"status":"ok","database":true}
-   curl -s "http://127.0.0.1:8788/hook/<KEY>?message=本机验证"
+   curl -s http://127.0.0.1:7002/healthz            # {"status":"ok","database":true}
+   curl -s "http://127.0.0.1:7002/hook/<KEY>?message=本机验证"
    docker logs notify-hub | grep jobs_tick_disabled
    ```
    这个开关存在的理由就是第 2 步和验证之间的手滑余地：compose 里默认 `0`，带 `JOBS_TICK_DISABLED=1` 起容器时日志一定是 `jobs_tick_disabled`。
@@ -238,7 +238,7 @@ notify-hub/
 ├── scripts/
 │   ├── db-init.sh         # 建库建账号 + 建表 + 生成 .env / .env.test
 │   ├── deploy.sh          # npm test 闸门 → 构建 → 起容器 → 等健康
-│   ├── gw-join.sh         # 接共享公网入口（域名 → notify-hub:8787，TRUST_PROXY=1）
+│   ├── gw-join.sh         # 接共享公网入口（域名 → notify-hub:80，TRUST_PROXY=1）
 │   ├── d1-import.sh       # 导出线上 D1（经代理、指定 -c）+ 调下面的搬运器
 │   └── d1-to-mysql.mjs    # D1 → MySQL 搬运与逐字段回读校验（一次性，带 --apply 才写）
 ├── worker/
@@ -283,7 +283,7 @@ cd worker && npm test       # 三套全绿，201 条断言
 ```bash
 docker logs -f notify-hub                                   # 只有 scanned/errors 非空才打 jobs_tick
 docker inspect -f '{{.State.Health.Status}}' notify-hub     # healthy / unhealthy / starting
-curl -s http://127.0.0.1:8788/healthz                       # {"status":"ok","database":true}
+curl -s http://127.0.0.1:7002/healthz                       # {"status":"ok","database":true}
 docker compose restart                                      # 改完 .env 不用重建镜像时
 ./scripts/deploy.sh                                         # 改完代码：重建并重启（带测试闸门）
 docker exec mysql-server sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction notify_hub' \

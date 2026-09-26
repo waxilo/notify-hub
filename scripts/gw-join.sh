@@ -19,7 +19,7 @@
 # custom domain 路由。路由在的时候边缘把名字接走，网关收不到流量。
 #
 # TRUST_PROXY 是必须的：回调地址由请求的 origin 拼出来（src/bots.js 的 callback_url），
-# 不信任转发头时容器只能看到 http://127.0.0.1:8787，回给 QQ 控制台的地址就是错的。
+# 不信任转发头时容器只能看到 http://127.0.0.1:80，回给 QQ 控制台的地址就是错的。
 #
 # 撤销公网访问：删掉 ../gw/conf.d/<名字首段>.conf 并在网关内 reload。
 set -euo pipefail
@@ -28,7 +28,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 PUBLIC_HOSTNAME="${1:-notify-hub.sloan.dpdns.org}"
-CONTAINER_TARGET="notify-hub:8787"   # 必须是容器名：网关容器里的 127.0.0.1 是它自己
+CONTAINER_TARGET="notify-hub:80"   # 必须是容器名：网关容器里的 127.0.0.1 是它自己
 GW_DIR="${GW_DIR:-$ROOT_DIR/../gw}"
 NETWORK=gw_default
 

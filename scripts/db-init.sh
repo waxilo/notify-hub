@@ -67,7 +67,7 @@ DB_PASSWORD=$(password 24)
 JWT_SECRET=$(password 48)
 TRUST_PROXY=0
 APP_BIND_ADDR=127.0.0.1
-APP_PORT=8788
+APP_PORT=7002
 EOF
   chmod 600 .env
 else
@@ -132,7 +132,7 @@ cat <<EOF
 
 下一步：
   ./scripts/deploy.sh              # npm test 闸门 → 构建 → 起容器 → 探活
-  open http://127.0.0.1:${APP_PORT:-8788}
+  open http://127.0.0.1:${APP_PORT:-7002}
   ./scripts/gw-join.sh             # 可选：接共享公网入口（../gw）
 
 线上 D1 数据还在 Cloudflare：导入用 ./scripts/d1-import.sh（见 README「数据搬迁」）。
