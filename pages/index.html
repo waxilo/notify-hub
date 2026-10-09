@@ -4,26 +4,26 @@
   <meta charset="UTF-8" data-page-node-id="pJo8Dh5rUXzPzBPKRs8Krz" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" data-page-node-id="23klOorwVcABnr5VYV7CCh" />
   <meta name="color-scheme" content="light" />
-  <meta name="theme-color" content="#0E1116" />
+  <!-- 顶栏改为浅色毛玻璃后，移动端浏览器 chrome 也跟着走浅色 -->
+  <meta name="theme-color" content="#FFFFFF" />
   <title>Notify Hub · 通知中转控制台</title>
   <meta name="description" content="把任意系统的一条 HTTP 请求，变成手机上的通知。Webhook 接入、Key 路由、服务端定时任务与 QQ 机器人触达。" />
 
   <!-- favicon 内联为 data URI：省一次请求，也避免控制台里那条 /favicon.ico 404 -->
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230E1116'/%3E%3Cg fill='%23FF5A1F'%3E%3Crect x='6.6' y='18' width='4.6' height='7.4' rx='2'/%3E%3Crect x='13.7' y='12.6' width='4.6' height='12.8' rx='2'/%3E%3Crect x='20.8' y='6.8' width='4.6' height='18.6' rx='2'/%3E%3C/g%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23101113'/%3E%3Cg fill='%23FF5A1F'%3E%3Crect x='6.6' y='18' width='4.6' height='7.4' rx='2'/%3E%3Crect x='13.7' y='12.6' width='4.6' height='12.8' rx='2'/%3E%3Crect x='20.8' y='6.8' width='4.6' height='18.6' rx='2'/%3E%3C/g%3E%3C/svg%3E" />
 
-  <!-- 自托管字体（同源、无第三方 CDN）：只预载正文与品牌字，其余走 font-display: swap -->
-  <link rel="preload" href="./fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="preload" href="./fonts/archivo-800.woff2" as="font" type="font/woff2" crossorigin />
+  <!-- 自托管字体（同源、无第三方 CDN）：只预载正文家族（展示字与正文同一个文件），等宽走 swap -->
+  <link rel="preload" href="./fonts/instrument-sans-var.woff2" as="font" type="font/woff2" crossorigin />
 
   <!--
     缓存版本号：整个前端只有这一处。
     app.js 通过 import.meta.url 读到这里查询串，再拼给自己 import 的子模块，
-    所以改版时只需把下面两个 ?v= 同步成同一个新值（例如 20261009b → 20261010a）。
+    所以改版时只需把下面两个 ?v= 同步成同一个新值（例如 20261009d → 20261010a）。
   -->
-  <link rel="stylesheet" href="./styles.css?v=20261009b" data-page-node-id="LUqCOqkp7FAqZCMgYSyHkZ" />
+  <link rel="stylesheet" href="./styles.css?v=20261009d" data-page-node-id="LUqCOqkp7FAqZCMgYSyHkZ" />
 </head>
 <body data-page-node-id="RALNA7vWEsSSgzrh6lBi8s">
   <div id="app" data-page-node-id="UDkj0KnCAjWtymbJOHLA5h"></div>
-  <script type="module" src="./src/app.js?v=20261009b"></script>
+  <script type="module" src="./src/app.js?v=20261009d"></script>
 </body>
 </html>
