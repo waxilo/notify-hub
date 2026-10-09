@@ -114,13 +114,54 @@ notify-hub/
 │   │   └── utils.js
 │   ├── migrations/        # 0001~0010（0010: settings 表，幂等）
 │   └── test/              # schedule / jobs.smoke / routes 三套，npm test
-└── pages/                 # Web 控制台（纯静态，无构建）
+├── tools/
+│   └── verify-ui.mjs      # 前端验收：CDP 无头 Chrome，375/768/1440 三档逐页截图 + 断言
+└── pages/                 # Web 控制台（纯静态，无构建、无框架）
+    ├── index.html         # 唯一入口：字体 preload + 唯一的缓存版本号
+    ├── styles.css         # 设计系统（令牌 → 基础 → 组件 → 视图 → 动效 → 响应式）
+    ├── fonts/             # 自托管西文字体（Archivo / IBM Plex Sans / IBM Plex Mono）
+    └── src/
+        ├── config.js      # API_BASE
+        ├── api.js         # fetch 封装 + 顶部进度条
+        ├── ui.js          # 交互原语：吐司 / 弹层（可叠加）/ 确认框 / 骨架屏 / 复制
+        └── app.js         # 视图层：登录 + Key / 任务 / 机器人 / 文档 / 账号 / 历史
+```
+
+## Web 控制台（前端）
+
+**视觉方向**：工业实用 × 编辑式排版（代号「信号台」）。深墨顶栏压顶、暖灰纸底 + 方格纸纹理与颗粒层、
+单一信号橙强调色（主操作按钮走墨黑，避开"蓝按钮"套路）、等宽微标签与编号 eyebrow、状态用带信号灯的徽章。
+
+**字体**：`Archivo`（拉丁展示/数字）+ `IBM Plex Sans`（正文）+ `IBM Plex Mono`（代码、地址、微标签、
+表格数字，`tabular-nums`）。全部同源自托管在 `fonts/`，不请求任何第三方字体 CDN；中文一律落到系统黑体
+（不加载 CJK 网络字体，守住首屏预算）。许可见 `pages/fonts/LICENSE.txt`。
+
+**改版时的缓存版本号**：整个前端**只有 `index.html` 一处**需要改。`app.js` 用
+`new URL(import.meta.url).search` 读到 `?v=`，再拼给自己 `import` 的 `config.js / api.js / ui.js`，
+所以只需把 `index.html` 里 `styles.css` 与 `src/app.js` 的两个 `?v=` 同步成同一个新值
+（如 `20261009a` → `20261010a`）。**不要再往子模块里手写版本串** —— 那正是历史上"改了 api.js 却走缓存"
+这类问题的来源。
+
+**样式约定**：颜色 / 字号 / 间距 / 圆角 / 阴影 / 动效时长一律走 `:root` 令牌，组件内不写裸值；
+所有动效包在 `prefers-reduced-motion` 降级里。
+
+**本地预览**（模块与字体都需要 HTTP，直接双击 `index.html` 会因 CORS 失败）：
+
+```bash
+python -m http.server 8123 --directory pages
 ```
 
 ## 测试
 
 ```bash
-cd worker && npm test
+cd worker && npm test                      # 后端：调度算法 / 任务投递冒烟 / 路由表回归
+node tools/verify-ui.mjs                   # 前端：三档（375 / 768 / 1440）验收，退出码 0/1 可接 CI
+node tools/verify-ui.mjs 1440              # 只跑某一档
 ```
 
-三套全绿：调度算法（42+ 断言）、任务/投递冒烟（内存 SQLite + mock QQ API，含失败隔离用例）、路由表回归（24 条路由钉死 + 已删路由反向对照 + 回调验签用例）。
+后端三套全绿：调度算法（42+ 断言）、任务/投递冒烟（内存 SQLite + mock QQ API，含失败隔离用例）、路由表回归（24 条路由钉死 + 已删路由反向对照 + 回调验签用例）。
+
+前端验收脚本零依赖（Node 22 自带 `fetch` / `WebSocket` / `node:http`），自建静态服务 + CDP 驱动本机 Chrome，
+在三档视口下逐页截图并断言：无横向溢出、入场动效不卡在 `opacity<1`、行内 ⋯ 菜单不被后续行遮挡（`elementFromPoint` 实测命中）、
+弹层可叠加且 ESC 只关最上层、`[hidden]` 真的生效、表单取值走 `elements.*`、字体已加载、命中区 ≥44px、**WCAG 对比度实测 ≥4.5**、
+`prefers-reduced-motion` 下入场元素立即可见。截图落在系统临时目录。找不到 Chrome 时用 `CHROME=/path/to/chrome node tools/verify-ui.mjs`。

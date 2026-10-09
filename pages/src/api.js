@@ -1,5 +1,7 @@
-// 极简 API 封装：token 存 localStorage；所有请求自动挂全局加载遮罩
-import { API_BASE } from './config.js';
+// 极简 API 封装：token 存 localStorage；所有请求自动驱动顶部进度条
+// 版本号统一从入口脚本的 ?v= 派生（见 index.html 注释），所以这里不再手写版本串。
+const V = new URL(import.meta.url).search || '';
+const { API_BASE } = await import(`./config.js${V}`);
 
 const TOKEN_KEY = 'nh_token';
 
@@ -7,20 +9,35 @@ export function getToken() { return localStorage.getItem(TOKEN_KEY); }
 export function setToken(t) { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); }
 export function isLoggedIn() { return !!getToken(); }
 
-// ---------- 全局加载遮罩（计数器，支持并发请求） ----------
-let maskEl = null, maskCount = 0;
+/* ---------- 顶部进度条（计数器，支持并发请求） ----------
+   刻意不用全屏遮罩：切换启停这类瞬时请求不该把整个界面盖住，
+   耗时较久的列表则由各视图自己的骨架屏承担「正在加载」的表达。 */
+let barEl = null, barCount = 0, hideTimer = null;
+
 export function loadingPush() {
-  maskCount++;
-  if (!maskEl) {
-    maskEl = document.createElement('div');
-    maskEl.className = 'loading-mask';
-    maskEl.innerHTML = '<div class="loading-box"><div class="spinner"></div><span>加载中…</span></div>';
-    document.body.appendChild(maskEl);
+  barCount++;
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+  if (!barEl) {
+    barEl = document.createElement('div');
+    barEl.className = 'loadbar';
+    barEl.setAttribute('role', 'progressbar');
+    barEl.setAttribute('aria-label', '请求进行中');
+    barEl.innerHTML = '<i></i>';
+    document.body.appendChild(barEl);
   }
+  barEl.classList.add('on');
 }
+
 export function loadingPop() {
-  maskCount = Math.max(0, maskCount - 1);
-  if (maskCount === 0 && maskEl) { maskEl.remove(); maskEl = null; }
+  barCount = Math.max(0, barCount - 1);
+  if (barCount > 0 || !barEl) return;
+  const el = barEl;
+  el.classList.remove('on');
+  hideTimer = setTimeout(() => {
+    el.remove();
+    if (barEl === el) barEl = null;
+    hideTimer = null;
+  }, 320);
 }
 
 async function req(path, method = 'GET', body) {
@@ -76,3 +93,5 @@ export const api = {
   unbindQQ: (kind, openid) => req('/qq/config', 'PUT', { unbind_kind: kind, unbind_openid: openid }),
   testQQ: () => req('/qq/test', 'POST', {}),
 };
+
+export { API_BASE };
