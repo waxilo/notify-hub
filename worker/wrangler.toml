@@ -26,13 +26,15 @@ database_id = "2f5cf556-d3dd-4047-a55a-6c6613058c17"
 tag = "v2"
 deleted_classes = ["PushHub"]
 
-# QQ 官方机器人凭证与回调，全部用命令设置（不要写在这里）：
-#   wrangler secret put QQ_APP_ID
-#   wrangler secret put QQ_APP_SECRET
-# openid 自动捕获：群里 @机器人 → qq_group_openid；私聊机器人 → qq_user_openid。
-# 如需固定目标（沙箱/多群/指定好友），可额外：wrangler secret put QQ_GROUP_OPENID / QQ_USER_OPENID
+# QQ 机器人的凭证 / 触达目标 / 消息模板：**全部在 Web 控制台「机器人」页配置**
+# （存 D1 的 bots 表，按账号隔离、保存即生效、无需重新部署）。
 #
-# 触达目标：c2c=只发私聊（当前调试单聊）/ group=只发群 / both=都发。
-# 这是「未在 Web 配置」时的兜底值；Web 控制台「机器人」页配置的值优先于此处。
-[vars]
-QQ_TARGET = "c2c"
+# 重构说明（2026-09-15）：原先这里的 QQ_APP_ID / QQ_APP_SECRET / QQ_TARGET /
+# QQ_GROUP_OPENID / QQ_USER_OPENID 等 env 兜底已**整体移除** —— 它们是全局单份的，
+# 会让没有配置机器人的账号意外共用同一个机器人、并把消息发到号主的群/好友上，
+# 与「机器人按账号隔离」直接冲突。如果线上凭证此前只写在 secret 里、没进过控制台，
+# 需要到控制台重新填一次（或用 0011 迁移前的老库数据自动迁移，见 migrations/0011_bots.sql）。
+#
+# openid 捕获是自动的：把机器人拉进群 @它 说句话 / 加好友私聊发一句话，
+# 即按「触发它的那个机器人」记进 bot_targets，控制台可查看与移除。
+

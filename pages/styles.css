@@ -599,6 +599,17 @@ select { appearance: none; padding-right: 34px;
 .key-menu .btn:hover::after { transform: scaleX(0); }
 .key-menu .btn.danger:hover { background: rgba(179, 38, 30, .07); }
 
+/* ---- 卡片头部右侧的工具组（机器人卡片：设为默认 / 测试 / 删除） ---- */
+.card-tools { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* ---- 卡片内的次级区块（机器人卡片下方的推送名单） ---- */
+.card-sub {
+  margin-top: var(--sp-5); padding-top: var(--sp-4);
+  border-top: 1px dashed var(--line-strong);
+}
+.card-sub > .eyebrow { display: block; margin-bottom: var(--sp-3); }
+.card-sub .kv { margin: 0 0 var(--sp-3); }
+
 /* ---- 徽标 chip（推送名单） ---- */
 .bind-chip {
   display: inline-flex; align-items: center; gap: 6px;

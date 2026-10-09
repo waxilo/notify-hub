@@ -1,15 +1,21 @@
 // 通知投递公共函数：写库 + QQ 官方机器人推送（唯一触达通道）
 // webhook（外部触发）与 jobs（定时触发）共用这一份，避免两处逻辑漂移。
 //
+// 走哪个机器人：key.bot_id / job.bot_id → 为空则账号默认机器人（bots.js resolveBotFor）。
+// 机器人是**账号隔离**的 —— 解析永远带 user_id 条件，绝不可能落到别人的机器人上；
+// 账号一个机器人都没接入时只入库不推送（历史里显示「未送达」，接好机器人后新消息照常发）。
+//
 // 失败隔离语义：
-//   消息**先入库再推送** —— QQ 网关失败/未配置时通知不丢，历史里显示「未送达」；
+//   消息**先入库再推送** —— 机器人没配好 / QQ 网关失败时通知不丢，历史里显示「未送达」；
 //   推送成功才写 delivered_at（历史里显示「已送达」）。
 import { json } from './utils.js';
-import { resolveBotConfig, targetKinds, getOpenids, sendToOpenid, getMessageTemplate, renderMessage } from './qq.js';
+import { resolveBotFor, targetKinds, getTargets, renderMessage, botDeliveryConfig } from './bots.js';
+import { sendToOpenid } from './qq.js';
 
 const DEDUP_WINDOW_MS = 300_000;   // 5 分钟防重窗口
 
-// opts: { userId, keyId, jobId, keyName, title, body, payload, dedupKey, dedup, rejected }
+// opts: { userId, botId, keyId, jobId, keyName, title, body, payload, dedupKey, dedup, rejected }
+//   botId：key / job 上显式绑定的机器人；留空 = 用账号默认机器人。
 //   jobId：定时任务触发时传入，用于把这条通知归到某个任务名下（可单独查历史 / 清空）。
 //          外部 webhook 写入时留空，那类通知记在 keyId 上。
 //   rejected：非空表示这次调用被服务端拒绝（如 key 已停用）。只留痕不推送 ——
@@ -19,6 +25,7 @@ const DEDUP_WINDOW_MS = 300_000;   // 5 分钟防重窗口
 export async function deliver(env, opts) {
   const {
     userId,
+    botId = null,
     keyId = null,
     jobId = null,
     keyName = '',
@@ -42,7 +49,7 @@ export async function deliver(env, opts) {
   }
 
   const res = await env.DB.prepare(
-    'INSERT INTO notifications (user_id, key_id, job_id, dedup_key, title, body, payload, rejected, created_at, read) VALUES (?,?,?,?,?,?,?,?,?,0)'
+    'INSERT INTO notifications (user_id, key_id, job_id, dedup_key, title, body, payload, rejected, created_at, `read`) VALUES (?,?,?,?,?,?,?,?,?,0)'
   ).bind(userId, keyId, jobId, dk, t, b, payload, rejected, Date.now()).run();
   const id = res.meta.last_row_id;
   if (id == null) return { id: null, error: 'insert failed' };
@@ -53,36 +60,46 @@ export async function deliver(env, opts) {
   // 空内容只入库不推送（历史里展示为「空消息」）
   if (!b.trim()) return { id, empty: true };
 
-  // QQ 推送：目标由 QQ_TARGET 决定（group / c2c / both），凭证从 Web 配置/env 解析。
-  // 每类目标按 openid 名单扇出（多个群 / 多个好友都收到）；单目标失败只记日志，
-  // 至少一个目标送达即写 delivered_at；名单为空视为未绑定（走同一隔离路径）。
   let qqSent = false;
   try {
-    const cfg = await resolveBotConfig(env);
-    const text = renderMessage(await getMessageTemplate(env), { title: t, body: b });
-    for (const kind of targetKinds(cfg.target)) {
-      const openids = await getOpenids(env, kind);
-      if (!openids.length) {
-        console.error('deliver_qq_error', JSON.stringify({
-          id, target: kind,
-          err: kind === 'group'
-            ? 'qq 群未绑定：把机器人拉进群并 @它 发一条消息即自动加入名单'
-            : 'qq 私聊未绑定：加机器人为好友并私聊它发一条消息即自动加入名单',
-        }));
-        continue;
-      }
-      for (const openid of openids) {
-        try {
-          await sendToOpenid(env, cfg, kind, openid, text);
-          qqSent = true;
-        } catch (err) {
-          console.error('deliver_qq_error', JSON.stringify({ id, target: kind, to: openid, err: String(err).slice(0, 300) }));
+    const bot = await resolveBotFor(env, userId, botId);
+    if (!bot) {
+      console.error('deliver_no_bot', JSON.stringify({
+        id, user_id: userId, bot_id: botId,
+        err: '该账号还没有接入 QQ 机器人（控制台「机器人」页新建并填入 AppID/AppSecret）',
+      }));
+    } else if (!bot.app_id || !bot.app_secret) {
+      console.error('deliver_bot_incomplete', JSON.stringify({ id, bot_id: bot.id, app_id: bot.app_id || '' }));
+    } else {
+      const cfg = botDeliveryConfig(bot);
+      const text = renderMessage(cfg.template, { title: t, body: b });
+      const targets = await getTargets(env, bot.id);
+      // 每类目标按该机器人自己的名单扇出（多个群 / 多个好友都收到）
+      for (const kind of targetKinds(cfg.target)) {
+        const openids = targets[kind] || [];
+        if (!openids.length) {
+          console.error('deliver_target_empty', JSON.stringify({
+            id, bot_id: bot.id, target: kind,
+            err: kind === 'group'
+              ? '该机器人还没有绑群：把机器人拉进群并 @它 发一条消息即自动加入名单'
+              : '该机器人还没有绑好友：加机器人为好友并私聊它发一条消息即自动加入名单',
+          }));
+          continue;
+        }
+        for (const openid of openids) {
+          try {
+            await sendToOpenid(cfg, kind, openid, text);
+            qqSent = true;
+          } catch (err) {
+            console.error('deliver_qq_error', JSON.stringify({ id, bot_id: bot.id, target: kind, to: openid, err: String(err).slice(0, 300) }));
+          }
         }
       }
     }
   } catch (err) {
-    console.error('deliver_qq_config_error', JSON.stringify({ id, err: String(err).slice(0, 200) }));
+    console.error('deliver_bot_error', JSON.stringify({ id, bot_id: botId, err: String(err).slice(0, 200) }));
   }
+  // 单个目标失败不影响其他目标；至少一个送达即算这条通知已送达
   if (qqSent) {
     await env.DB.prepare('UPDATE notifications SET delivered_at=? WHERE id=?').bind(Date.now(), id).run();
   }

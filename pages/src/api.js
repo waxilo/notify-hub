@@ -87,11 +87,13 @@ export const api = {
   createJob: (body) => req('/jobs', 'POST', body),
   updateJob: (id, body) => req(`/jobs/${id}`, 'PUT', body),
   deleteJob: (id) => req(`/jobs/${id}`, 'DELETE'),
-  // QQ 机器人配置：secret/openid 服务端只回掩码；app_secret 留空 = 保持不变
-  getQQConfig: () => req('/qq/config'),
-  updateQQConfig: (body) => req('/qq/config', 'PUT', body),
-  unbindQQ: (kind, openid) => req('/qq/config', 'PUT', { unbind_kind: kind, unbind_openid: openid }),
-  testQQ: () => req('/qq/test', 'POST', {}),
+  // 机器人：账号隔离，每账号可接多个（其中一个为默认），key / 定时任务可各自指定用哪个
+  listBots: () => req('/bots'),
+  createBot: (body = {}) => req('/bots', 'POST', body),
+  updateBot: (id, body) => req(`/bots/${id}`, 'PUT', body),
+  deleteBot: (id) => req(`/bots/${id}`, 'DELETE'),
+  testBot: (id) => req(`/bots/${id}/test`, 'POST', {}),
+  unbindBotTarget: (id, kind, openid) => req(`/bots/${id}/targets`, 'DELETE', { kind, openid }),
 };
 
 export { API_BASE };

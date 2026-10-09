@@ -68,21 +68,28 @@ const MOCK = `
 (() => {
   const T0 = 1757200000000;
   const KEYS = [
-    { id: 5, name: '服务器告警', key: 'nh_9f2c', keyFull: 'nh_9f2c4a7b1e8d', active: true,  mode: 'default', last_used: T0 - 3600e3 },
-    { id: 6, name: 'CI 构建完成', key: 'nh_ab31', keyFull: 'nh_ab31de90c4f5', active: true,  mode: 'custom', last_used: null },
-    { id: 7, name: '临时调试用', key: 'nh_77aa', keyFull: 'nh_77aa02ff19be', active: false, mode: 'default', last_used: T0 - 86400e3 * 6 }
+    { id: 5, name: '服务器告警', key: 'nh_9f2c', keyFull: 'nh_9f2c4a7b1e8d', active: true,  mode: 'default', last_used: T0 - 3600e3, bot_id: 1, bot_name: '私人机器人' },
+    { id: 6, name: 'CI 构建完成', key: 'nh_ab31', keyFull: 'nh_ab31de90c4f5', active: true,  mode: 'custom', last_used: null, bot_id: null, bot_name: null },
+    { id: 7, name: '临时调试用', key: 'nh_77aa', keyFull: 'nh_77aa02ff19be', active: false, mode: 'default', last_used: T0 - 86400e3 * 6, bot_id: 2, bot_name: '运维机器人' }
   ];
   const JOBS = [
-    { id: 1, name: '每日签到提醒', body: '', schedule: 'daily:09:00', desc: '每天 09:00', enabled: true, tz: '+08:00', next_run_at: T0 + 5400e3, last_run_at: T0 - 81000e3, sent_count: 42, skip_holiday: true },
-    { id: 2, name: '服务器巡检', body: '检查磁盘与内存占用，超过阈值立即告警', schedule: 'every:2h', desc: '每 2 小时', enabled: true, tz: '+08:00', next_run_at: T0 + 1800e3, last_run_at: T0 - 5400e3, sent_count: 118 },
-    { id: 3, name: '周报提醒', body: '', schedule: 'weekly:5,18:00', desc: '每周五 18:00', enabled: false, tz: '+08:00', next_run_at: null, last_run_at: T0 - 200000e3, sent_count: 7 }
+    { id: 1, name: '每日签到提醒', body: '', schedule: 'daily:09:00', desc: '每天 09:00', enabled: true, tz: '+08:00', next_run_at: T0 + 5400e3, last_run_at: T0 - 81000e3, sent_count: 42, skip_holiday: true, bot_id: 2, bot_name: '运维机器人' },
+    { id: 2, name: '服务器巡检', body: '检查磁盘与内存占用，超过阈值立即告警', schedule: 'every:2h', desc: '每 2 小时', enabled: true, tz: '+08:00', next_run_at: T0 + 1800e3, last_run_at: T0 - 5400e3, sent_count: 118, bot_id: null, bot_name: null },
+    { id: 3, name: '周报提醒', body: '', schedule: 'weekly:5,18:00', desc: '每周五 18:00', enabled: false, tz: '+08:00', next_run_at: null, last_run_at: T0 - 200000e3, sent_count: 7, bot_id: null, bot_name: null }
   ];
-  const QQ = {
-    app_id: '102839471', has_secret: true, secret_masked: '••••••a91f', target: 'c2c',
-    msg_template: '{title}\\n{body}\\n{time}',
-    group_openids: ['8A1B2C3D4E5F60718293A4B5C6D7E8F9', 'C7D2E3F4A5B60718293A4B5C6D7E8F90'],
-    user_openids: ['9F3E5D7C1B2A4039281F6E5D4C3B2A10']
-  };
+  // 多机器人（账号隔离）：一个默认 + 一个普通，覆盖「设为默认」「测试连接」等分支
+  const BOTS = [
+    { id: 1, name: '私人机器人', app_id: '102839471', has_secret: true, secret_masked: '••••••a91f',
+      target: 'c2c', msg_template: '', is_default: true,
+      group_openids: [], user_openids: ['9F3E5D7C1B2A4039281F6E5D4C3B2A10'],
+      callback_url: 'https://notify-hub.example.com/api/qq/callback' },
+    { id: 2, name: '运维机器人', app_id: '102839599', has_secret: false, secret_masked: '',
+      target: 'both', msg_template: '{title}\\n{body}', is_default: false,
+      group_openids: ['8A1B2C3D4E5F60718293A4B5C6D7E8F9', 'C7D2E3F4A5B60718293A4B5C6D7E8F90'],
+      user_openids: [],
+      callback_url: 'https://notify-hub.example.com/api/qq/callback' }
+  ];
+  const BOTS_RESP = { bots: BOTS, max: 10, default_msg_template: '{title}\\n{body}\\n{time}' };
   const NOTIFS = [1, 2, 3, 4, 5].map((i) => ({
     id: 70 + i, title: i % 2 ? '服务器告警' : 'CI 构建完成',
     body: i === 3 ? '' : (i % 2 ? 'CPU 使用率超过 90%（当前 94.2%），已持续 5 分钟' : 'build #' + (4100 + i) + ' 构建成功，用时 3 分 12 秒'),
@@ -97,7 +104,9 @@ const MOCK = `
     const m = (opts.method || 'GET').toUpperCase();
     if (path === '/keys' && m === 'GET') return ok({ keys: KEYS });
     if (path === '/jobs' && m === 'GET') return ok({ jobs: JOBS });
-    if (path === '/qq/config' && m === 'GET') return ok(QQ);
+    if (path === '/bots' && m === 'GET') return ok(BOTS_RESP);
+    // 机器人的增改删/测试：统一回一个成功壳，够前端走完流程即可
+    if (path.startsWith('/bots')) return ok({ ok: true, bot: BOTS[0] });
     if (path === '/notifications') return ok({ notifications: NOTIFS, total: 23 });
     if (m !== 'GET') return ok({ ok: true, id: 99, next_run_at: T0 + 86400e3, deleted: 23 });
     return ok({});
@@ -271,6 +280,18 @@ async function run(width, height, tag, cdp) {
     await shoot(name);
   }
 
+  /* --- 多机器人：卡片、名单芯片、Key/任务行上的「推送机器人」 --- */
+  await ev(`document.querySelector('[data-tab=qqbot]').click(); true`);
+  await sleep(800);
+  R['机器人 · 卡片数'] = await ev(`document.querySelectorAll('#view-qqbot .card').length`);
+  R['机器人 · 名单芯片数'] = await ev(`document.querySelectorAll('#view-qqbot .bind-chip').length`);
+  R['机器人 · 默认徽章数'] = await ev(`document.querySelectorAll('#view-qqbot .badge.on').length`);
+  R['机器人 · 新建按钮可用'] = await ev(`!document.querySelector('#btn-new-bot').disabled`);
+  R['机器人 · 回调地址已填'] = await ev(`(document.querySelector('#view-qqbot [data-copy]')?.dataset.copy || '').includes('/api/qq/callback')`);
+  await ev(`document.querySelector('[data-tab=keys]').click(); true`);
+  await sleep(800);
+  R['Key 行 · 显示推送机器人'] = await ev(`document.querySelector('#key-list .row-meta').textContent.replace(/\\s+/g, ' ').trim()`);
+
   /* --- 行内操作菜单：必须盖在后面的行上 --- */
   await ev(`document.querySelector('[data-tab=keys]').click(); true`);
   await sleep(800);
@@ -316,6 +337,9 @@ async function run(width, height, tag, cdp) {
   R['表单 · elements.name 类型'] = await ev(`document.querySelector('#job-form').elements.name.tagName`);
   R['表单 · 读出现有任务名'] = await ev(`document.querySelector('#job-form').elements.name.value`);
   R['表单 · 编辑态预览'] = await ev(`document.querySelector('#job-preview').textContent`);
+  // 第 2 个任务未绑定机器人 → 下拉应默认落在「跟随默认机器人」，共 1 + 2 项
+  R['表单 · 任务推送机器人下拉项数'] = await ev(`document.querySelector('#job-form [name=bot_id]')?.options.length`);
+  R['表单 · 任务机器人当前值'] = await ev(`JSON.stringify(document.querySelector('#job-form [name=bot_id]')?.value)`);
   R['表单 · 间隔型可见字段数'] = await ev(`Array.from(document.querySelectorAll('#job-form .job-fields')).filter(d => !d.hidden).length`);
   await ev(`(() => { const F = document.querySelector('#job-form').elements; F.kind.value = 'weekly'; F.kind.dispatchEvent(new Event('change')); return true; })()`);
   await sleep(300);
@@ -335,6 +359,8 @@ async function run(width, height, tag, cdp) {
   await ev(`Array.from(document.querySelectorAll('.key-menu button')).find(b => b.textContent.includes('编辑')).click(); true`);
   await sleep(600);
   R['表单 · 自定义模式模板可见'] = await ev(`document.querySelector('#tpl-fields').offsetParent !== null`);
+  R['表单 · Key 推送机器人下拉项数'] = await ev(`document.querySelector('#edit-form [name=bot_id]')?.options.length`);
+  R['表单 · Key 机器人当前值'] = await ev(`JSON.stringify(document.querySelector('#edit-form [name=bot_id]')?.value)`);
   await ev(`document.querySelector('#edit-form input[value=default]').click(); true`);
   await sleep(300);
   R['表单 · 切默认后模板隐藏'] = await ev(`document.querySelector('#tpl-fields').offsetParent === null`);
