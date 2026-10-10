@@ -1,14 +1,19 @@
 /* ==========================================================================
    Notify Hub 控制台 · 设计系统
-   方向：极简 · 精密（Precision Minimal）× 单一家族排版
+   方向：浅色毛玻璃拟态（Frosted Glass）× 单一家族排版
    --------------------------------------------------------------------------
-   1 字体面 · 2 令牌层 · 3 基础层 · 4 布局壳（含左右分栏）
-   5 组件层 · 6 视图层 · 7 弹层 · 8 动效编排 · 9 响应式
+   1 字体面 · 2 令牌层 · 3 基础层（极光画布）· 4 布局壳（含左右分栏）
+   5 组件层 · 6 视图层 · 7 弹层 · 8 动效编排 · 9 响应式 · 10 降级
 
-   三条纪律：
+   三条纪律（详见仓库根目录 DESIGN.md）：
    ① 颜色 / 字号 / 间距 / 圆角 / 阴影 / 动效时长一律走令牌，组件里不写裸值；
    ② 强调色只有一支（信号橙），只出现在「当前态 / 焦点圈 / 关键数字」这类 10% 的位置；
-   ③ 结构靠留白与发丝线分隔，不靠底色深浅、纹理与装饰堆叠。
+   ③ 层级靠「玻璃层数 + 亮边 + 上缘高光 + 冷调投影」表达，不靠底色深浅。
+
+   排版与间距这一版完全不动 —— 拟态只换材质，字阶 / 间距 / 布局契约保持「极简 · 精密」。
+
+   性能预算：同屏 backdrop-filter 层 ≤ 3（顶栏 + 打开的弹层）。
+   面板内部的次级面只用 alpha 阶梯分层，绝不再套一层 blur。
 
    布局契约：控制台每个页面都是「左列表 / 右详情」两栏（.split.drill）。
    接入文档与账号没有"条目操作"，用 .split.flow（窄屏顺序堆叠，不做钻取）。
@@ -47,16 +52,13 @@
   --font-sans: "Instrument Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "PingFang SC", monospace;
 
-  /* 色 —— 冷中性灰阶承载结构，近黑承担动作，单一信号橙只做强调 */
-  --paper: #f5f6f7;          /* 页面底 */
-  --paper-deep: #eceef0;     /* 比底色再深一档：轨道、内嵌区 */
-  --surface: #ffffff;        /* 卡片面 */
-  --surface-2: #f4f5f6;      /* 次级面：输入框、代码块、行内块 */
+  /* 色 —— 画布是一片极光雾（见 3 基础层），结构全部交给玻璃阶梯承担 */
+  --paper: #eef1f6;          /* 页面底色（极光底下的那层冷白瓷） */
   --ink: #101113;            /* 近黑：主按钮、登录展示板 */
   --ink-2: #26282c;          /* 近黑悬停 */
   --text: #16181b;
-  --muted: #63676d;          /* 正文级次要文字：纸底上 5.3:1，白面上 5.7:1 */
-  --muted-2: #7c828a;        /* 占位符等非正文场景 */
+  --muted: #5c6169;          /* 正文级次要文字：玻璃上 5.6:1（比旧值加深，白雾会吃掉对比度） */
+  --muted-2: #787e87;        /* 占位符等非正文场景 */
   --accent: #ff5a1f;         /* 唯一强调色：焦点圈、当前态指示 */
   --accent-ink: #a83309;     /* 强调色的文字变体（小字对比度 ≥ 4.5:1） */
 
@@ -66,9 +68,55 @@
   --danger: #b3261e;
   --info: #3e4c63;
 
-  --line: rgba(16, 17, 19, .09);        /* 发丝线 */
-  --line-strong: rgba(16, 17, 19, .15);
-  --line-hover: rgba(16, 17, 19, .26);
+  --line: rgba(16, 17, 19, .08);        /* 发丝线（玻璃之间的墨线分隔） */
+  --line-soft: rgba(16, 17, 19, .06);   /* 更淡的一档：行分隔 */
+  --line-strong: rgba(16, 17, 19, .14);
+
+  /* 玻璃阶梯 —— 层级 = 不透明度，不是颜色深浅
+     g1 大面板 / g2 次级内嵌 / g3 抬起（输入、弹层）/ g4 选中与焦点 */
+  --g1: rgba(255, 255, 255, .46);
+  --g2: rgba(255, 255, 255, .40);
+  --g3: rgba(255, 255, 255, .72);
+  --g4: rgba(255, 255, 255, .88);
+  --g-shell: rgba(255, 255, 255, .58);   /* 顶栏这类贴内容的薄壳 */
+  --g-dark: rgba(16, 17, 19, .78);       /* 深色玻璃：吐司、登录展示板 */
+
+  /* 面板**内部**的分层 —— 一律只用 alpha，绝不再叠一层 blur（玻璃糊玻璃会发灰掉帧）。
+     降级时这一组会被整体替换成实心色，所以组件里不许再写裸 rgba。 */
+  --g-band: rgba(255, 255, 255, .30);    /* 头栏 / 页签条这类内嵌带 */
+  --g-card: rgba(255, 255, 255, .46);    /* 卡片区 */
+  --g-card-h: rgba(255, 255, 255, .58);
+  --g-row: rgba(255, 255, 255, .42);     /* 行 / 页签 hover */
+  --g-row-on: rgba(255, 255, 255, .74);  /* 行选中（抬起） */
+  --g-input: rgba(255, 255, 255, .5);    /* 输入槽 */
+  --g-input-h: rgba(255, 255, 255, .66);
+  --g-input-on: rgba(255, 255, 255, .92);
+  --g-groove: rgba(16, 17, 19, .055);    /* 凹槽（分段控件、导航轨道） */
+  --g-inset: rgba(16, 17, 19, .045);     /* 暗槽（代码块） */
+  --g-veil: rgba(255, 255, 255, .22);    /* 空态这类"几乎看不见"的面 */
+
+  /* 玻璃三件套：亮边 + 上缘镜面高光 + 冷紫底调投影（灰投影会让玻璃发脏） */
+  --glass-bd: rgba(255, 255, 255, .62);
+  --glass-bd-soft: rgba(255, 255, 255, .42);
+  --glass-bd-strong: rgba(255, 255, 255, .84);
+  --sheen: inset 0 1px 0 rgba(255, 255, 255, .78);
+  --sheen-soft: inset 0 1px 0 rgba(255, 255, 255, .6);
+  --sink: inset 0 1px 2px rgba(30, 27, 60, .06);   /* 凹陷（输入槽、代码槽、导航轨道） */
+
+  /* 深色玻璃上的对应物（登录展示板、吐司） */
+  --g-on-dark: rgba(255, 255, 255, .12);
+  --bd-on-dark: rgba(255, 255, 255, .18);
+
+  /* 强调色洗底（提示条 / 预览条）：同一支橙，只做浓淡 */
+  --wash-accent: rgba(255, 90, 31, .13);
+  --wash-accent-soft: rgba(255, 90, 31, .05);
+  --wash-ok: rgba(10, 110, 78, .13);
+  --wash-ok-soft: rgba(10, 110, 78, .05);
+  --ring-accent: 0 0 0 3px rgba(255, 90, 31, .16);
+
+  --blur-S: saturate(1.7) blur(16px);
+  --blur-M: saturate(1.8) blur(22px);
+  --blur-L: saturate(1.9) blur(28px);
 
   /* 字阶（1.25 模数） */
   --fs-2xs: 10.5px;
@@ -86,13 +134,14 @@
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
   --sp-5: 24px; --sp-6: 40px; --sp-7: 72px;
 
-  /* 圆角：整体偏收敛，靠 1px 线与留白切分，不靠大圆角做"软" */
-  --r-xs: 4px; --r-sm: 6px; --r-md: 9px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
+  /* 圆角：比上一版整体放大一档 —— 玻璃要有厚度感 */
+  --r-xs: 6px; --r-sm: 10px; --r-md: 14px; --r-lg: 18px; --r-xl: 26px; --r-pill: 999px;
 
-  /* 阴影三级：极低对比的冷调投影，只用来交代层级，不做装饰 */
-  --sh-1: 0 1px 2px rgba(16, 17, 19, .04);
-  --sh-2: 0 1px 2px rgba(16, 17, 19, .05), 0 6px 16px -6px rgba(16, 17, 19, .08);
-  --sh-3: 0 16px 40px -12px rgba(16, 17, 19, .22), 0 2px 8px rgba(16, 17, 19, .06);
+  /* 阴影三级：一律内嵌 sheen 起头，外投影取冷紫底调 */
+  --sh-1: var(--sheen), 0 1px 2px rgba(30, 27, 60, .05), 0 8px 22px -14px rgba(30, 27, 60, .18);
+  --sh-2: var(--sheen), 0 2px 4px rgba(30, 27, 60, .06), 0 18px 40px -18px rgba(30, 27, 60, .24);
+  --sh-3: inset 0 1px 0 rgba(255, 255, 255, .9), 0 2px 8px rgba(30, 27, 60, .10), 0 40px 72px -28px rgba(30, 27, 60, .36);
+  --sh-flat: 0 1px 2px rgba(16, 17, 19, .18);   /* 主按钮这类实心块用的普通投影 */
 
   /* 动效 */
   --ease-out: cubic-bezier(.16, 1, .3, 1);
@@ -119,12 +168,32 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* 氛围层：顶部一片极淡的信号橙雾，把视线引向品牌区。
-   不用网格、噪点等纹理 —— 极简方向下留白本身就是质感。 */
+/* 氛围层：一整片固定的极光雾 + 极淡噪点，所有玻璃都浮在这层上。
+   噪点必须在玻璃**后面** —— 它是透过玻璃看见的颗粒，这才是"磨砂"的来源；
+   把噪点盖在内容上只会让字发糊。颗粒要"将将看得见"，重了就变成脏。
+   三束雾刻意压在内容区（分栏面板）背后，不然玻璃后面是纯色，糊不糊根本看不出来。 */
 body::before {
   content: "";
   position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  background: radial-gradient(1100px 460px at 50% -220px, rgba(255, 90, 31, .07), transparent 72%);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.14'/%3E%3C/svg%3E"),
+    radial-gradient(760px 520px at 14% 8%, rgba(255, 90, 31, .28), transparent 62%),
+    radial-gradient(700px 480px at 88% 14%, rgba(91, 140, 255, .26), transparent 64%),
+    radial-gradient(820px 560px at 46% 58%, rgba(150, 120, 255, .1), transparent 66%),
+    radial-gradient(980px 620px at 72% 108%, rgba(58, 214, 176, .14), transparent 62%),
+    linear-gradient(180deg, #f3f5f9, #e7ebf3);
+  background-size: 180px 180px, auto, auto, auto, auto, auto;
+}
+/* 一束缓慢漂移的光：给静止的雾一点生气，也让滚动时玻璃后面有东西可糊。
+   只动 transform（合成层），不重绘渐变。 */
+body::after {
+  content: "";
+  position: fixed; left: 50%; top: 42%; width: 62vw; height: 62vw;
+  margin: -31vw 0 0 -31vw; z-index: 0; pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 122, 60, .22), transparent 66%);
+  filter: blur(48px);
+  animation: drift 26s ease-in-out infinite alternate;
 }
 #app { position: relative; z-index: 2; }
 
@@ -147,14 +216,15 @@ img, svg { display: block; max-width: 100%; }
 main.shell { padding-bottom: var(--sp-7); }
 main > section[hidden] { display: none !important; }
 
-/* 顶栏：浅色毛玻璃，只留一条发丝线。不再是大面积深色块 ——
-   页面重心交给内容，导航退成"一层薄壳"。 */
+/* 顶栏：一片贴在内容上的薄玻璃 —— 滚动内容从它身后穿过时被糊掉，
+   这是整个拟态系统里最"值钱"的一层 blur，务必留在预算内。 */
 .topbar {
   position: sticky; top: 0; z-index: 60;
-  background: rgba(255, 255, 255, .78);
-  -webkit-backdrop-filter: saturate(1.8) blur(14px);
-  backdrop-filter: saturate(1.8) blur(14px);
-  border-bottom: 1px solid var(--line);
+  background: var(--g-shell);
+  -webkit-backdrop-filter: var(--blur-M);
+  backdrop-filter: var(--blur-M);
+  border-bottom: 1px solid var(--glass-bd-soft);
+  box-shadow: 0 1px 0 rgba(16, 17, 19, .05), 0 12px 28px -20px rgba(30, 27, 60, .28);
 }
 .topbar .shell {
   display: flex; align-items: center; gap: var(--sp-4);
@@ -167,11 +237,11 @@ main > section[hidden] { display: none !important; }
   letter-spacing: -.02em; color: var(--ink); white-space: nowrap;
 }
 /* 品牌标记：三根递增的信号柱（与 favicon 同形），"信号强度"即产品语义。
-   近黑底 + 橙色柱 —— 与浏览器标签页图标完全一致。 */
+   近黑底 + 橙色柱 —— 与浏览器标签页图标完全一致。实心块压在玻璃上，层级最稳。 */
 .brand .mark {
-  width: 26px; height: 26px; border-radius: 8px; flex: none; display: block;
+  width: 26px; height: 26px; border-radius: 9px; flex: none; display: block;
   background: var(--ink);
-  box-shadow: 0 1px 2px rgba(16, 17, 19, .2);
+  box-shadow: var(--sh-flat), inset 0 1px 0 rgba(255, 255, 255, .16);
 }
 .brand .mark svg { display: block; width: 100%; height: 100%; }
 .brand .mark svg rect { fill: var(--accent); }
@@ -179,41 +249,44 @@ main > section[hidden] { display: none !important; }
   font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 600;
   letter-spacing: .12em; text-transform: uppercase;
   color: var(--muted);
-  background: rgba(16, 17, 19, .05);
+  background: var(--g2);
+  border: 1px solid var(--glass-bd-soft);
   border-radius: var(--r-pill);
   padding: 3px 8px 2px;
 }
 
-/* 导航做成"分段控件"：一条浅灰轨道上滑一枚白药丸表示当前项 ——
-   比下划线更安静，也比变色更明确。 */
+/* 导航做成"玻璃凹槽 + 滑块"：轨道是一块内嵌的暗槽，当前项浮起一枚白药丸。
+   凹槽必须用 inset 阴影表达"凹"，药丸用 sheen 表达"凸"，两者共用一套玻璃语言。 */
 .topnav {
   display: flex; align-items: center; gap: 2px; margin-left: auto;
-  padding: 3px; border-radius: 11px;
-  background: rgba(16, 17, 19, .05);
+  padding: 3px; border-radius: 13px;
+  background: var(--g-groove);
+  border: 1px solid var(--line);
+  box-shadow: var(--sink);
 }
 .topnav button {
   position: relative; border: 0; background: transparent; cursor: pointer;
-  height: 34px; padding: 0 13px; border-radius: 8px;
+  height: 34px; padding: 0 13px; border-radius: 10px;
   font-family: inherit; font-size: var(--fs-md); font-weight: 500;
   color: var(--muted); white-space: nowrap;
   transition: color var(--dur-1) ease, background var(--dur-1) ease,
               box-shadow var(--dur-2) var(--ease-out);
 }
-.topnav button:hover { color: var(--text); background: rgba(255, 255, 255, .66); }
+.topnav button:hover { color: var(--text); background: var(--g-row); }
 .topnav button.active {
   color: var(--ink); font-weight: 600;
-  background: var(--surface); box-shadow: var(--sh-1);
+  background: var(--g4); box-shadow: var(--sh-1);
 }
 
 /* 退出是"离开"而非导航，只用文字表达，不跟药丸抢注意力 */
 .nav-exit {
   flex: none; height: 34px; padding: 0 10px;
-  border: 0; border-radius: 8px; background: transparent; cursor: pointer;
+  border: 0; border-radius: 10px; background: transparent; cursor: pointer;
   font-family: inherit; font-size: var(--fs-md); font-weight: 500;
   color: var(--muted);
   transition: color var(--dur-1) ease, background var(--dur-1) ease;
 }
-.nav-exit:hover { color: var(--text); background: rgba(16, 17, 19, .05); }
+.nav-exit:hover { color: var(--text); background: var(--g-row); }
 
 /* 页面标题区：左标题 + 右统计，非对称；下压一条发丝线作为章节起点 */
 .page-head {
@@ -272,12 +345,17 @@ main > section[hidden] { display: none !important; }
   gap: var(--sp-5);
   align-items: start;           /* 让左栏 sticky 生效（stretch 会撑满导致粘不住） */
 }
+/* 分栏面板 = 系统里的主玻璃层。亮边 + 上缘高光 + 冷调投影三件套齐全。
+   顶边那一道斜向白色渐变是"镜面反射"：没有它，一块半透明白只会显得像没加载完。 */
 .pane {
   min-width: 0;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: var(--g1);
+  background-image: linear-gradient(168deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 38%);
+  -webkit-backdrop-filter: var(--blur-M);
+  backdrop-filter: var(--blur-M);
+  border: 1px solid var(--glass-bd);
   border-radius: var(--r-lg);
-  box-shadow: var(--sh-1);
+  box-shadow: var(--sh-2);
   overflow: hidden;             /* 圆角裁掉子元素直角 */
   animation: riseIn var(--dur-2) var(--ease-out) both;
 }
@@ -293,12 +371,13 @@ main > section[hidden] { display: none !important; }
 }
 .pane-list > .pane-body { flex: 1; min-height: 0; overflow: auto; padding: 0; }
 
+/* 头栏 / 页签条：面板内部的次级面 —— 只加 alpha，绝不再套一层 blur */
 .pane-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-2); flex-wrap: wrap; flex: none;
   padding: 11px var(--sp-3) 11px var(--sp-4);
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, .30);
+  border-bottom: 1px solid var(--glass-bd-soft);
 }
 .pane-id { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
 /* 详情头部的主标题（条目名），过长时省略而不是折行压扁头部 */
@@ -327,40 +406,59 @@ main > section[hidden] { display: none !important; }
 /* 右栏子页签（配置 / 发送历史） */
 .pane-tabs {
   display: flex; gap: var(--sp-1); flex: none;
-  padding: 0 var(--sp-3);
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  padding: 6px var(--sp-3) 0;
+  border-bottom: 1px solid var(--glass-bd-soft);
+  background: var(--g-band);
 }
 .tab {
   position: relative; border: 0; background: transparent; cursor: pointer;
-  padding: 11px 10px 9px; margin-bottom: -1px;
-  border-bottom: 2px solid transparent;
+  padding: 8px 12px 9px; margin-bottom: -1px;
+  border: 1px solid transparent; border-bottom: 0;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
   font-family: inherit; font-size: var(--fs-sm); font-weight: 500; color: var(--muted);
-  transition: color var(--dur-1) ease, border-color var(--dur-1) ease;
+  transition: color var(--dur-1) ease, background var(--dur-1) ease,
+              border-color var(--dur-1) ease;
 }
-.tab:hover { color: var(--text); }
-.tab.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.tab:hover { color: var(--text); background: var(--g-row); }
+/* 当前页签从玻璃里"浮起"，和顶栏药丸同一套语言；橙色短线保留作二次确认 */
+.tab.on {
+  color: var(--ink); font-weight: 600;
+  background: var(--g4);
+  border-color: var(--glass-bd);
+  box-shadow: 0 -2px 8px -4px rgba(30, 27, 60, .18);
+}
+.tab.on::after {
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
+  border-radius: 2px 2px 0 0; background: var(--accent);
+}
 
 .pane-foot {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-3); flex-wrap: wrap;
   margin-top: var(--sp-5); padding-top: var(--sp-4);
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--glass-bd-soft);
 }
 
 /* --------------------------------------------------------------- 5 组件层 */
 
-/* ---- 卡片：详情栏内的次级区块 ---- */
+/* ---- 卡片：详情栏内的次级区块 ----
+   玻璃面板里的卡片不再 blur（一层糊就够了），改用更实的一层白 + 亮边表达"第二层"。 */
 .card {
   position: relative;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  background: var(--g-card);
+  border: 1px solid var(--glass-bd-soft);
+  border-radius: var(--r-md);
   padding: var(--sp-5);
-  transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+  box-shadow: var(--sheen-soft);
+  transition: background var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out),
+              box-shadow var(--dur-2) var(--ease-out);
 }
 .card + .card, .stack > .card + * { margin-top: var(--sp-4); }
-.card:hover { border-color: var(--line-strong); box-shadow: var(--sh-1); }
+.card:hover {
+  background: var(--g-card-h);
+  border-color: var(--glass-bd);
+  box-shadow: var(--sh-1);
+}
 
 .card-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -377,12 +475,12 @@ main > section[hidden] { display: none !important; }
 }
 .card-foot {
   margin-top: var(--sp-4); padding-top: var(--sp-3);
-  border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--muted);
+  border-top: 1px solid var(--glass-bd-soft); font-size: var(--fs-sm); color: var(--muted);
 }
 /* 卡片内的次级区块（机器人详情下方的推送名单） */
 .card-sub {
   margin-top: var(--sp-5); padding-top: var(--sp-4);
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--glass-bd-soft);
 }
 .card-sub > .eyebrow { display: block; margin-bottom: var(--sp-3); color: var(--muted); }
 /* 卡内小节标签不属于「当前态 / 关键数字」，收掉橙色短线与强调色，避免强调色被稀释 */
@@ -394,15 +492,20 @@ main > section[hidden] { display: none !important; }
   display: block; width: 100%; text-align: left;
   position: relative;
   padding: 12px var(--sp-4);
-  border: 0; border-bottom: 1px solid var(--line);
+  border: 0; border-bottom: 1px solid var(--line-soft);
   background: transparent; cursor: pointer;
   font-family: inherit; font-size: var(--fs-base); color: var(--text);
-  transition: background var(--dur-1) ease;
+  transition: background var(--dur-1) ease, box-shadow var(--dur-2) var(--ease-out);
 }
 .item:last-child { border-bottom: 0; }
-.item:hover { background: var(--surface-2); }
-.item.on { background: var(--surface-2); }
-/* 选中：左侧一条实心指示轨（不靠底色深浅，弱视也分得清） */
+.item:hover { background: rgba(255, 255, 255, .42); }
+/* 选中：这块玻璃真的"抬起来"一点（白度 + 高光 + 投影），不只换个底色 */
+.item.on {
+  background: var(--g-row-on);
+  box-shadow: var(--sheen), inset 0 0 0 1px var(--glass-bd-soft),
+              0 6px 18px -12px rgba(30, 27, 60, .3);
+}
+/* 选中：左侧一条实心指示轨（状态不只靠明度差，弱视也分得清） */
 .item.on::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
   background: var(--accent);
@@ -429,25 +532,27 @@ main > section[hidden] { display: none !important; }
 /* 停用条目：极淡的斜纹底 + 褪色名称（状态不只用颜色表达） */
 .item.off {
   background:
-    repeating-linear-gradient(135deg, rgba(16, 17, 19, .028) 0 6px, transparent 6px 13px),
-    var(--surface-2);
+    repeating-linear-gradient(135deg, rgba(16, 17, 19, .022) 0 6px, transparent 6px 13px),
+    var(--g-band);
 }
 .item.off .item-name { color: var(--muted); }
 .item.off.on { background:
-  repeating-linear-gradient(135deg, rgba(16, 17, 19, .042) 0 6px, transparent 6px 13px),
-  var(--surface-2); }
+  repeating-linear-gradient(135deg, rgba(16, 17, 19, .034) 0 6px, transparent 6px 13px),
+  var(--g-card-h); }
 
-/* ---- 按钮：悬停靠"底色 + 描边"两个微变量，不再有底部扫线 ---- */
+/* ---- 按钮：主按钮保持实心近黑（玻璃上唯一"压得住"的动作锚点），
+       次按钮是一小块抬起的玻璃 ---- */
 .btn {
-  --btn-bg: var(--surface);
+  --btn-bg: var(--g3);
   --btn-fg: var(--text);
-  --btn-bd: var(--line-strong);
-  --btn-bg-h: var(--surface-2);
-  --btn-bd-h: var(--line-hover);
+  --btn-bd: var(--glass-bd);
+  --btn-bg-h: var(--g4);
+  --btn-bd-h: var(--glass-bd-strong);
+  --btn-shadow: var(--sh-1);
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   min-height: 38px; padding: 0 15px;
   border: 1px solid var(--btn-bd); border-radius: var(--r-md);
-  background: var(--btn-bg); color: var(--btn-fg);
+  background: var(--btn-bg); color: var(--btn-fg); box-shadow: var(--btn-shadow);
   font-family: inherit; font-size: var(--fs-md); font-weight: 500; letter-spacing: -.005em;
   white-space: nowrap; cursor: pointer; text-decoration: none;
   transition: background var(--dur-1) ease, border-color var(--dur-1) ease,
@@ -459,44 +564,47 @@ main > section[hidden] { display: none !important; }
 .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 
 .btn.primary {
-  --btn-bg: var(--ink); --btn-fg: #fff; --btn-bd: var(--ink);
-  --btn-bg-h: var(--ink-2); --btn-bd-h: var(--ink-2);
+  --btn-bg: var(--ink); --btn-fg: #fff; --btn-bd: rgba(16, 17, 19, .8);
+  --btn-bg-h: var(--ink-2); --btn-bd-h: rgba(255, 255, 255, .22);
+  --btn-shadow: var(--sh-flat);
 }
-.btn.primary:hover { box-shadow: 0 6px 16px -6px rgba(16, 17, 19, .5); }
+.btn.primary:hover { box-shadow: 0 8px 20px -8px rgba(16, 17, 19, .5), inset 0 1px 0 rgba(255, 255, 255, .18); }
 .btn.danger {
   --btn-fg: var(--danger); --btn-bd: rgba(179, 38, 30, .3);
-  --btn-bg-h: rgba(179, 38, 30, .06); --btn-bd-h: rgba(179, 38, 30, .55);
+  --btn-bg-h: rgba(179, 38, 30, .09); --btn-bd-h: rgba(179, 38, 30, .55);
 }
 .btn.primary.danger {
-  --btn-bg: var(--danger); --btn-fg: #fff; --btn-bd: var(--danger);
-  --btn-bg-h: #9d1f18; --btn-bd-h: #9d1f18;
+  --btn-bg: var(--danger); --btn-fg: #fff; --btn-bd: rgba(179, 38, 30, .8);
+  --btn-bg-h: #9d1f18; --btn-bd-h: rgba(255, 255, 255, .24);
 }
-.btn.primary.danger:hover { box-shadow: 0 6px 16px -6px rgba(179, 38, 30, .55); }
+.btn.primary.danger:hover { box-shadow: 0 8px 20px -8px rgba(179, 38, 30, .55), inset 0 1px 0 rgba(255, 255, 255, .2); }
 .btn.ghost {
   --btn-bg: transparent; --btn-bd: transparent; --btn-fg: var(--muted);
-  --btn-bg-h: rgba(16, 17, 19, .05); --btn-bd-h: transparent;
+  --btn-bg-h: var(--g-card-h); --btn-bd-h: var(--glass-bd-soft);
+  --btn-shadow: none;
 }
 .btn.ghost:hover { --btn-fg: var(--text); }
 .btn.mini { min-height: 30px; padding: 0 10px; font-size: var(--fs-sm); border-radius: var(--r-sm); gap: 5px; }
 .btn.block { width: 100%; }
 .btn .ic { font-family: var(--font-mono); font-size: 1.05em; line-height: 1; }
 
-/* ---- 徽章与信号灯 ---- */
+/* ---- 徽章与信号灯：彩色玻璃小药丸（tinted glass） ---- */
 .badge {
   display: inline-flex; align-items: center; gap: 6px;
   height: 22px; padding: 0 9px; border-radius: var(--r-pill);
   border: 1px solid transparent;
   font-size: var(--fs-xs); font-weight: 500; letter-spacing: .01em; white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5);
 }
 .badge .lamp { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
-.badge.on { color: var(--ok); background: rgba(10, 110, 78, .08); border-color: rgba(10, 110, 78, .18); }
+.badge.on { color: var(--ok); background: rgba(10, 110, 78, .12); border-color: rgba(10, 110, 78, .24); }
 .badge.on .lamp { animation: lampPulse 2.6s ease-in-out infinite; }
-.badge.off { color: #5c626c; background: rgba(16, 17, 19, .05); border-color: var(--line); }
-.badge.mode { color: var(--info); background: rgba(62, 76, 99, .07); border-color: rgba(62, 76, 99, .16); }
-.badge.empty-msg { color: #5c626c; background: rgba(16, 17, 19, .05); border-color: var(--line); }
+.badge.off { color: #545a64; background: rgba(84, 90, 100, .12); border-color: rgba(84, 90, 100, .2); }
+.badge.mode { color: var(--info); background: rgba(62, 76, 99, .11); border-color: rgba(62, 76, 99, .22); }
+.badge.empty-msg { color: #545a64; background: rgba(84, 90, 100, .12); border-color: rgba(84, 90, 100, .2); }
 /* 停用拒绝 = 真错误，用实心填充拉开与品牌橙的距离 */
-.badge.rejected { color: #fff; background: var(--danger); border-color: var(--danger); }
+.badge.rejected { color: #fff; background: var(--danger); border-color: rgba(255, 255, 255, .34); }
 .badge.rejected .lamp { background: #fff; }
 
 b.ok { color: var(--ok); }
@@ -514,21 +622,27 @@ b.rej { color: var(--danger); }
   font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0;
   color: var(--muted);
 }
+/* 输入类控件是"凹进玻璃的一槽水"：底色比面板更实，配内阴影表达凹陷。
+   焦点态抬到接近纯白 + 橙色光圈，读起来像槽里亮起了灯。 */
 input:not([type=checkbox]):not([type=radio]),
 select,
 textarea {
   width: 100%; min-height: 40px; padding: 9px 12px;
-  border: 1px solid var(--line-strong); border-radius: var(--r-md);
-  background: var(--surface); color: var(--text);
+  border: 1px solid var(--glass-bd); border-radius: var(--r-md);
+  background: var(--g-input); color: var(--text);
+  box-shadow: var(--sink);
   font-family: inherit; font-size: var(--fs-md); line-height: 1.5;
-  transition: border-color var(--dur-1) ease, box-shadow var(--dur-1) ease;
+  transition: background var(--dur-1) ease, border-color var(--dur-1) ease,
+              box-shadow var(--dur-1) ease;
 }
 input:not([type=checkbox]):not([type=radio]):hover,
-select:hover, textarea:hover { border-color: var(--line-hover); }
+select:hover, textarea:hover { background: var(--g-input-h); border-color: var(--glass-bd-strong); }
 input:not([type=checkbox]):not([type=radio]):focus,
 select:focus, textarea:focus {
   outline: none;
-  border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 90, 31, .13);
+  background: var(--g-input-on);
+  border-color: var(--accent);
+  box-shadow: var(--ring-accent), var(--sink);
 }
 input::placeholder, textarea::placeholder { color: var(--muted-2); }
 textarea {
@@ -536,13 +650,13 @@ textarea {
   min-height: 128px; resize: vertical;
 }
 select { appearance: none; padding-right: 34px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.6 6 6.4l5-4.8' fill='none' stroke='%2363676d' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.6 6 6.4l5-4.8' fill='none' stroke='%235c6169' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-position: calc(100% - 14px) center;
   background-size: 12px 8px;
   background-repeat: no-repeat;
 }
 
-/* 自绘复选框：方角墨块 + 对勾 */
+/* 自绘复选框：方角墨块 + 对勾（选中态保持实心，玻璃上要能一眼确认） */
 .check {
   display: flex; align-items: flex-start; gap: 10px;
   margin: var(--sp-3) 0; font-size: var(--fs-md); line-height: 1.6; cursor: pointer;
@@ -550,12 +664,13 @@ select { appearance: none; padding-right: 34px;
 .check input {
   appearance: none; -webkit-appearance: none; flex: none;
   width: 18px; height: 18px; margin: 2px 0 0; padding: 0; min-height: 0;
-  border: 1.5px solid var(--line-strong); border-radius: var(--r-xs);
-  background: var(--surface); cursor: pointer; position: relative;
+  border: 1.5px solid var(--glass-bd-strong); border-radius: var(--r-xs);
+  background: var(--g-input); cursor: pointer; position: relative;
+  box-shadow: var(--sink);
   transition: background var(--dur-1) ease, border-color var(--dur-1) ease;
 }
 .check input:hover { border-color: var(--accent); }
-.check input:checked { background: var(--ink); border-color: var(--ink); }
+.check input:checked { background: var(--ink); border-color: rgba(16, 17, 19, .7); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18); }
 .check input:checked::after {
   content: ""; position: absolute; left: 5.5px; top: 1.5px;
   width: 5px; height: 10px;
@@ -568,21 +683,24 @@ select { appearance: none; padding-right: 34px;
 .row-inline input { flex: 1; }
 .row-inline .btn { flex: none; }
 
-/* ---- 分段选择（与顶栏导航同一套语言：灰轨道 + 白药丸） ---- */
+/* ---- 分段选择（与顶栏导航同一套语言：玻璃凹槽 + 抬起白药丸） ---- */
 .seg {
   display: flex; gap: 2px; padding: 3px;
-  background: rgba(16, 17, 19, .05); border-radius: 11px;
+  background: var(--g-groove);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  box-shadow: var(--sink);
 }
 .seg-item { flex: 1; margin: 0; cursor: pointer; position: relative; }
 .seg-item input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .seg-item span {
-  display: block; text-align: center; padding: 8px 8px; border-radius: 8px;
+  display: block; text-align: center; padding: 8px 8px; border-radius: 10px;
   font-size: var(--fs-sm); font-weight: 500; color: var(--muted);
   transition: background var(--dur-1) ease, color var(--dur-1) ease, box-shadow var(--dur-1) ease;
 }
-.seg-item span:hover { color: var(--text); }
+.seg-item span:hover { color: var(--text); background: var(--g-row); }
 .seg-item input:checked + span {
-  background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--sh-1);
+  background: var(--g4); color: var(--ink); font-weight: 600; box-shadow: var(--sh-1);
 }
 .seg-item input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -593,12 +711,14 @@ select { appearance: none; padding-right: 34px;
 .job-fields input, .job-fields select { flex: 1; min-width: 0; }
 .job-fields .pre { flex: none; font-size: var(--fs-md); color: var(--muted); }
 .preview {
-  margin: 10px 0 0; padding-left: 12px; border-left: 2px solid var(--accent);
+  margin: 10px 0 0; padding: 6px 0 6px 12px; border-left: 2px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: linear-gradient(90deg, var(--wash-accent), transparent 78%);
   font-size: var(--fs-sm); color: var(--text); font-weight: 500;
 }
 
 /* ---- 折叠区 ---- */
-.adv { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.adv { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--glass-bd-soft); }
 .adv > summary {
   list-style: none; cursor: pointer; user-select: none;
   display: flex; align-items: center; gap: 7px;
@@ -616,8 +736,9 @@ select { appearance: none; padding-right: 34px;
 .bind-chip {
   display: inline-flex; align-items: center; gap: 6px;
   margin: 3px 5px 3px 0; padding: 3px 5px 3px 10px;
-  border: 1px solid var(--line); border-radius: var(--r-pill);
-  background: var(--surface-2);
+  border: 1px solid var(--glass-bd); border-radius: var(--r-pill);
+  background: var(--g-card-h);
+  box-shadow: var(--sheen-soft);
   font-family: var(--font-mono); font-size: var(--fs-xs);
 }
 .bind-chip .unbind {
@@ -626,7 +747,7 @@ select { appearance: none; padding-right: 34px;
   color: var(--muted); font-size: 14px; line-height: 1; cursor: pointer;
   transition: background var(--dur-1) ease, color var(--dur-1) ease;
 }
-.bind-chip .unbind:hover { background: rgba(179, 38, 30, .1); color: var(--danger); }
+.bind-chip .unbind:hover { background: rgba(179, 38, 30, .14); color: var(--danger); }
 
 /* ---- 文本工具类 ---- */
 .hint { color: var(--muted); font-size: var(--fs-sm); line-height: 1.8; }
@@ -643,7 +764,8 @@ select { appearance: none; padding-right: 34px;
    在浅底上会掉到 4.3:1（低于 4.5 门槛） */
 code {
   font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text);
-  background: rgba(16, 17, 19, .055);
+  background: var(--g-card-h);
+  border: 1px solid var(--glass-bd-soft);
   border-radius: var(--r-xs);
   padding: 2px 6px; word-break: break-all;
 }
@@ -658,18 +780,19 @@ code {
 /* 放进 .field 时由 .field 负责外边距，避免双重间距 */
 .field .cred { margin: 0; }
 
-/* ---- 提示条 ---- */
+/* ---- 提示条：一块带方向感的彩色玻璃，左边实心橙轨做状态锚点 ---- */
 .alert {
   position: relative; margin: var(--sp-3) 0; padding: var(--sp-4) var(--sp-4) var(--sp-4) 18px;
-  border: 1px solid rgba(255, 90, 31, .22); border-radius: var(--r-md);
-  background: rgba(255, 90, 31, .045);
+  border: 1px solid var(--glass-bd); border-radius: var(--r-md);
+  background: linear-gradient(90deg, var(--wash-accent), var(--wash-accent-soft));
+  box-shadow: var(--sheen-soft);
   font-size: var(--fs-md); line-height: 1.9;
 }
 .alert::before {
   content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px;
   border-radius: 0 3px 3px 0; background: var(--accent);
 }
-.alert.ok { border-color: rgba(10, 110, 78, .24); background: rgba(10, 110, 78, .045); }
+.alert.ok { background: linear-gradient(90deg, var(--wash-ok), var(--wash-ok-soft)); }
 .alert.ok::before { background: var(--ok); }
 .alert .btn.mini { margin: 0 4px 0 0; vertical-align: middle; }
 .alert .cred { margin-bottom: 0; }
@@ -678,20 +801,23 @@ code {
 .empty {
   display: flex; flex-direction: column; align-items: center; gap: var(--sp-3);
   padding: var(--sp-6) var(--sp-5);
-  border: 1px dashed var(--line-strong); border-radius: var(--r-lg);
+  border: 1px dashed var(--glass-bd-strong); border-radius: var(--r-md);
+  background: var(--g-veil);
+  box-shadow: var(--sheen-soft);
   color: var(--muted); font-size: var(--fs-sm); text-align: center;
 }
-.pane-body .empty { border: 0; }
+.pane-body .empty { border: 0; background: transparent; box-shadow: none; }
 .empty .glyph {
   font-family: var(--font-mono); font-size: var(--fs-xl);
-  letter-spacing: .35em; color: rgba(16, 17, 19, .18);
+  letter-spacing: .35em; color: rgba(16, 17, 19, .2);
 }
 
-/* ---- 骨架屏 ---- */
+/* ---- 骨架屏：改成"掠过玻璃的一道反光"，比灰色呼吸块更贴材质 ---- */
 .sk {
   border-radius: var(--r-sm);
-  background: linear-gradient(90deg, rgba(16, 17, 19, .045) 25%, rgba(16, 17, 19, .085) 37%, rgba(16, 17, 19, .045) 63%);
+  background: linear-gradient(90deg, var(--g-veil) 25%, var(--g-card-h) 37%, var(--g-veil) 63%);
   background-size: 400% 100%;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
   animation: skShift 1.5s ease-in-out infinite;
 }
 .sk-row { height: 74px; margin-bottom: 10px; }
@@ -701,21 +827,23 @@ code {
 .pane-body.flush .sk-row:first-child { margin-top: 10px; }
 .pane-body.flush .sk-row { margin-left: var(--sp-4); margin-right: var(--sp-4); }
 
-/* ---- 表格 ---- */
+/* ---- 表格：表头是内嵌的一道槽，行 hover 只是玻璃上的一点提亮 ——
+   表格行绝对不能自己叠 blur，一层糊就够了，而且会掉帧。 */
 .table-wrap { overflow-x: auto; margin: 0 calc(var(--sp-2) * -1); }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 th {
   padding: 9px 10px; text-align: left; white-space: nowrap;
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
+  background: var(--g-band);
   font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 500;
   letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
 }
 td {
-  padding: 11px 10px; border-bottom: 1px solid var(--line);
+  padding: 11px 10px; border-bottom: 1px solid var(--line-soft);
   vertical-align: top; line-height: 1.6;
 }
 tbody tr { transition: background var(--dur-1) ease; }
-tbody tr:hover { background: var(--surface-2); }
+tbody tr:hover { background: var(--g-card); }
 tr:last-child td { border-bottom: 0; }
 td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
@@ -763,21 +891,25 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 
 /* --------------------------------------------------------------- 6 视图层 */
 
-/* ---- 登录 / 注册：非对称双栏，左墨右纸 ---- */
+/* ---- 登录 / 注册：非对称双栏，左深色玻璃展示板 / 右玻璃卡 ---- */
 .auth { display: grid; grid-template-columns: 1.12fr .88fr; min-height: 100vh; }
 .auth-art {
   position: relative; overflow: hidden;
   display: flex; flex-direction: column; justify-content: space-between;
   padding: var(--sp-7) var(--sp-6);
-  background: var(--ink); color: #fff;
+  background: var(--g-dark);
+  -webkit-backdrop-filter: var(--blur-L);
+  backdrop-filter: var(--blur-L);
+  color: #fff;
+  border-right: 1px solid var(--bd-on-dark);
 }
 /* 深色板上的两张氛围层：一层很淡的网格（交代"接口/信号"的语感），
    一层橙色光雾（画面重心） */
 .auth-art .mesh {
   position: absolute; inset: 0; pointer-events: none;
   background-image:
-    linear-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, .035) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, .05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .05) 1px, transparent 1px);
   background-size: 36px 36px;
   -webkit-mask-image: radial-gradient(74% 62% at 26% 20%, #000, transparent 76%);
   mask-image: radial-gradient(74% 62% at 26% 20%, #000, transparent 76%);
@@ -785,7 +917,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 .auth-art .glow {
   position: absolute; width: 440px; height: 440px; left: -110px; top: -140px;
   border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle, rgba(255, 90, 31, .34), transparent 66%);
+  background: radial-gradient(circle, rgba(255, 90, 31, .4), transparent 66%);
   filter: blur(28px);
   animation: breathe 9s ease-in-out infinite;
 }
@@ -793,13 +925,13 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 .auth-art .watermark {
   position: absolute; right: -14px; bottom: -40px; pointer-events: none;
   font-family: var(--font-mono); font-weight: 600; font-size: 118px; line-height: 1;
-  letter-spacing: -.06em; color: rgba(255, 255, 255, .04); white-space: nowrap;
+  letter-spacing: -.06em; color: rgba(255, 255, 255, .05); white-space: nowrap;
 }
 .auth-art > * { position: relative; z-index: 1; }
 .auth-art .brand { color: #fff; }
-.auth-art .brand .mark { background: #fff; box-shadow: none; }
+.auth-art .brand .mark { background: #fff; box-shadow: 0 8px 22px -10px rgba(0, 0, 0, .6); }
 .auth-art .brand .mark svg rect { fill: var(--ink); }
-.auth-art .brand .tag { color: rgba(255, 255, 255, .62); background: rgba(255, 255, 255, .09); }
+.auth-art .brand .tag { color: rgba(255, 255, 255, .7); background: var(--g-on-dark); border-color: var(--bd-on-dark); }
 .auth-art h1 {
   margin: var(--sp-6) 0 0; max-width: 17ch;
   font-size: clamp(26px, 3vw, 42px); font-weight: 600;
@@ -809,7 +941,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 /* 强调词不拆行：中文换行会把它劈成两半，标记高亮就不成形了 */
 .auth-art h1 em {
   font-style: normal; white-space: nowrap; color: var(--accent);
-  background: linear-gradient(transparent 64%, rgba(255, 90, 31, .24) 64%);
+  background: linear-gradient(transparent 64%, rgba(255, 90, 31, .28) 64%);
 }
 .feat {
   list-style: none; margin: var(--sp-6) 0 0; padding: 0;
@@ -822,17 +954,28 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
   font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 600;
   letter-spacing: .08em; color: var(--accent);
 }
-.feat .t { font-size: var(--fs-md); color: rgba(255, 255, 255, .72); line-height: 1.7; }
+.feat .t { font-size: var(--fs-md); color: rgba(255, 255, 255, .74); line-height: 1.7; }
 .feat .t b { color: #fff; font-weight: 600; }
 .auth-art .brand, .auth-art .foot { animation: riseIn var(--dur-2) var(--ease-out) both; }
 .auth-art .foot {
   font-family: var(--font-mono); font-size: var(--fs-2xs);
-  letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .36);
+  letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .4);
   animation-delay: 120ms;
 }
 
 .auth-panel { display: flex; align-items: center; justify-content: center; padding: var(--sp-6) var(--sp-5); }
-.auth-box { width: 100%; max-width: 372px; animation: riseIn var(--dur-2) var(--ease-out) both; }
+/* 右栏表单坐进一块抬起的厚玻璃：登录页没有顶栏抢 blur 预算，这块可以给足 */
+.auth-box {
+  width: 100%; max-width: 372px;
+  padding: var(--sp-5);
+  background: var(--g1);
+  -webkit-backdrop-filter: var(--blur-L);
+  backdrop-filter: var(--blur-L);
+  border: 1px solid var(--glass-bd);
+  border-radius: var(--r-xl);
+  box-shadow: var(--sh-2);
+  animation: riseIn var(--dur-2) var(--ease-out) both;
+}
 .auth-box .mark-row { display: flex; align-items: center; gap: 9px; margin-bottom: var(--sp-5); }
 .auth-box .mark-row .brand { color: var(--text); }
 .auth-box h2 { font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.03em; }
@@ -841,30 +984,32 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 .auth-box form .btn.block { margin-top: var(--sp-2); }
 .auth-note {
   margin-top: var(--sp-5); padding-top: var(--sp-4);
-  border-top: 1px solid var(--line); font-size: var(--fs-xs); color: var(--muted); line-height: 1.8;
+  border-top: 1px solid var(--glass-bd-soft); font-size: var(--fs-xs); color: var(--muted); line-height: 1.8;
 }
 .auth-back { margin-top: var(--sp-5); font-size: var(--fs-sm); }
 
 /* ---- 接入文档：正文直接落在详情栏里，章节序号由详情头部承担 ----
-   代码块用浅色（白底 + 发丝线），与整页明度一致；复制按钮放在头栏里，
+   代码块是"玻璃上凿出的暗槽"（比面板更深一档的墨透），复制按钮放在头栏里，
    不能浮在代码上 —— 长行要横向滚动，浮层按钮会一直压住正文。 */
 .doc-block {
   position: relative; margin: var(--sp-3) 0 var(--sp-4);
-  border: 1px solid var(--line); border-radius: var(--r-md);
-  overflow: hidden; background: var(--surface-2);
+  border: 1px solid var(--glass-bd); border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--g-inset);
+  box-shadow: var(--sink);
 }
 .doc-bar {
   display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
   padding: 7px 8px 7px var(--sp-4);
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  background: var(--g-row);
+  border-bottom: 1px solid var(--glass-bd-soft);
 }
 .doc-label {
   font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 500;
   letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
 }
 .doc-code {
-  padding: 14px var(--sp-4); background: var(--surface-2); color: var(--text);
+  padding: 14px var(--sp-4); background: transparent; color: var(--text);
   overflow-x: auto; white-space: pre;
   font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.8;
 }
@@ -883,13 +1028,16 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 }
 .kv dd { margin: 0; word-break: break-all; }
 
-/* ---- 历史原始载荷悬浮面板 ---- */
+/* ---- 历史原始载荷悬浮面板：一层抬起的厚玻璃（会占用 blur 预算，同屏只允许一个） ---- */
 .raw-pop {
   position: fixed; z-index: 900; overflow: auto;
   max-width: min(420px, calc(100vw - 24px));
   padding: var(--sp-3) 14px;
-  border: 1px solid var(--line); border-radius: var(--r-md);
-  background: var(--surface); color: var(--text);
+  border: 1px solid var(--glass-bd); border-radius: var(--r-md);
+  background: var(--g3);
+  -webkit-backdrop-filter: var(--blur-L);
+  backdrop-filter: var(--blur-L);
+  color: var(--text);
   box-shadow: var(--sh-3);
   font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.7;
   animation: menuIn var(--dur-1) var(--ease-out);
@@ -897,7 +1045,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 .raw-pop .raw-pop-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin-bottom: var(--sp-2); padding-bottom: var(--sp-2);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--glass-bd-soft);
   color: var(--ink); font-weight: 600;
 }
 .raw-pop pre {
@@ -921,19 +1069,20 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
   animation: barSweep 1.15s linear infinite;
 }
 
+/* 遮罩把整页糊成一张磨砂背景，模态再抬起来 —— 这两层共用一次 blur 预算 */
 .modal-mask {
   position: fixed; inset: 0; z-index: 100; display: flex;
   align-items: center; justify-content: center; padding: var(--sp-4);
-  background: rgba(16, 17, 19, .38);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
+  background: rgba(24, 22, 40, .42);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   animation: maskIn var(--dur-2) var(--ease-out) both;
 }
 .modal {
   position: relative; width: 100%; max-width: 440px; margin: 0;
   max-height: 88vh; overflow: auto; overscroll-behavior: contain;
   padding: var(--sp-5);
-  background: var(--surface); border: 1px solid var(--line);
+  background: var(--g3); border: 1px solid var(--glass-bd);
   border-radius: var(--r-xl); box-shadow: var(--sh-3);
   animation: panelIn var(--dur-2) var(--ease-out) both;
 }
@@ -944,7 +1093,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 }
 .modal-actions[hidden] { display: none; }
 
-/* 吐司 */
+/* 吐司：深色玻璃浮在浅色页面上 —— 明度反转，一眼可见但不抢内容 */
 .toasts {
   position: fixed; right: var(--sp-5); bottom: var(--sp-5); z-index: 200;
   display: flex; flex-direction: column; gap: 10px; pointer-events: none;
@@ -954,8 +1103,12 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
   display: flex; align-items: flex-start; gap: 10px;
   min-width: 232px; max-width: min(380px, calc(100vw - 40px));
   padding: var(--sp-3) var(--sp-4) var(--sp-3) 18px;
-  border-radius: var(--r-md); background: var(--ink); color: #fff;
-  box-shadow: var(--sh-3); font-size: var(--fs-md); line-height: 1.6;
+  border-radius: var(--r-md); background: var(--g-dark); color: #fff;
+  -webkit-backdrop-filter: var(--blur-S);
+  backdrop-filter: var(--blur-S);
+  border: 1px solid var(--bd-on-dark);
+  box-shadow: 0 2px 8px rgba(30, 27, 60, .12), 0 32px 56px -24px rgba(30, 27, 60, .44);
+  font-size: var(--fs-md); line-height: 1.6;
   pointer-events: auto;
   animation: toastIn var(--dur-2) var(--ease-out) both;
 }
@@ -983,6 +1136,8 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 @keyframes lampPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 @keyframes breathe { 0%, 100% { opacity: .78; transform: scale(1); } 50% { opacity: 1; transform: scale(1.07); } }
 @keyframes skShift { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+/* 极光漂移：只走 transform，合成层重排成本为零 */
+@keyframes drift { from { transform: translate3d(-14vw, -6vh, 0) scale(1); } to { transform: translate3d(16vw, 10vh, 0) scale(1.18); } }
 
 /* 全局降级：关掉一切动效，同时保证入场元素停在终态 */
 @media (prefers-reduced-motion: reduce) {
@@ -992,7 +1147,8 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
     transition-duration: .001ms !important;
     scroll-behavior: auto !important;
   }
-  .sk { background: rgba(16, 17, 19, .05); }
+  .sk { background: var(--g-card-h); }
+  body::after { display: none; }
 }
 
 /* --------------------------------------------------------- 9 响应式 */
@@ -1019,6 +1175,8 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 }
 
 @media (max-width: 720px) {
+  /* 移动端模糊半径整体降一档：低端 GPU 上大 blur 滚动会抖 */
+  :root { --blur-M: var(--blur-S); --blur-L: var(--blur-S); }
   /* 顶栏折成两行：第一行「品牌 + 退出」（退出固定可见），第二行是可横向滑动的页签条带。
      条带在这个宽度下退回"朴素文字"，免得药丸轨道被滚出可视区。 */
   .topbar .shell { flex-wrap: wrap; gap: 0; min-height: 0; padding: 10px var(--sp-4) 0; }
@@ -1028,11 +1186,12 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
     order: 3; flex: 1 1 100%;
     margin: 0 calc(var(--sp-4) * -1); padding: 2px var(--sp-4) 8px;
     overflow-x: auto; scrollbar-width: none;
-    background: transparent; border-radius: 0;
+    background: transparent; border-radius: 0; border: 0; box-shadow: none;
   }
   .topnav::-webkit-scrollbar { display: none; }
   .topnav button { flex: none; padding: 0 11px; }
-  .topnav button.active { background: rgba(16, 17, 19, .07); box-shadow: none; }
+  /* 轨道没了，当前项只能靠自己"浮起"来表达 —— 白药丸 + 投影 */
+  .topnav button.active { background: var(--g4); box-shadow: var(--sh-1); }
   .page-head { padding-top: var(--sp-5); }
   .page-head h1 { font-size: var(--fs-2xl); letter-spacing: -.028em; }
   .pane-body { padding: var(--sp-4); }
@@ -1063,4 +1222,47 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
   .bind-chip .unbind { width: 32px; height: 32px; }
   .topnav button { height: 44px; }
   .tab { padding-top: 15px; padding-bottom: 13px; }
+}
+
+/* ---------------------------------------------------- 10 无玻璃降级 */
+/* 两条路都要走：① 浏览器不支持 backdrop-filter；② 用户在系统里关了透明度
+   （prefers-reduced-transparency）。降级只换材质，布局一个像素都不动。
+   sheen / sink 这几个内阴影令牌被组件用逗号串在 box-shadow 里，
+   不能设成 none（`box-shadow: none, 0 1px 2px` 非法），所以要给一个"看不见的 0 值"。 */
+@supports not (backdrop-filter: blur(1px)) {
+  :root {
+    --blur-S: none; --blur-M: none; --blur-L: none;
+    --g1: #fdfdff; --g2: #f6f7fa; --g3: #ffffff; --g4: #ffffff;
+    --g-shell: #fbfcfe; --g-dark: #17181c;
+    --g-band: #f5f6f9; --g-card: #fbfcfe; --g-card-h: #f3f5f8;
+    --g-row: #f1f3f7; --g-row-on: #e9eef6; --g-veil: #f6f7fa;
+    --g-input: #ffffff; --g-input-h: #ffffff; --g-input-on: #ffffff;
+    --g-inset: #f3f4f7;
+    --glass-bd: var(--line); --glass-bd-soft: var(--line-soft); --glass-bd-strong: var(--line-strong);
+    --bd-on-dark: rgba(255, 255, 255, .16); --g-on-dark: rgba(255, 255, 255, .1);
+    --sheen: 0 0 0 0 transparent; --sheen-soft: 0 0 0 0 transparent; --sink: 0 0 0 0 transparent;
+    --sh-1: var(--sh-flat); --sh-2: 0 2px 10px -4px rgba(30, 27, 60, .16);
+    --sh-3: 0 16px 40px -12px rgba(30, 27, 60, .26);
+  }
+  body::after { display: none; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --blur-S: none; --blur-M: none; --blur-L: none;
+    --g1: #fdfdff; --g2: #f6f7fa; --g3: #ffffff; --g4: #ffffff;
+    --g-shell: #fbfcfe; --g-dark: #17181c;
+    --g-band: #f5f6f9; --g-card: #fbfcfe; --g-card-h: #f3f5f8;
+    --g-row: #f1f3f7; --g-row-on: #e9eef6; --g-veil: #f6f7fa;
+    --g-input: #ffffff; --g-input-h: #ffffff; --g-input-on: #ffffff;
+    --g-inset: #f3f4f7;
+    --glass-bd: var(--line); --glass-bd-soft: var(--line-soft); --glass-bd-strong: var(--line-strong);
+    --bd-on-dark: rgba(255, 255, 255, .16); --g-on-dark: rgba(255, 255, 255, .1);
+    --sheen: 0 0 0 0 transparent; --sheen-soft: 0 0 0 0 transparent; --sink: 0 0 0 0 transparent;
+    --sh-1: var(--sh-flat); --sh-2: 0 2px 10px -4px rgba(30, 27, 60, .16);
+    --sh-3: 0 16px 40px -12px rgba(30, 27, 60, .26);
+  }
+  body::after { display: none; }
+  /* 遮罩在"关透明度"偏好下也不能糊，改用实心暗面 */
+  .modal-mask { background: rgba(24, 22, 40, .72); backdrop-filter: none; }
 }
