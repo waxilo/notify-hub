@@ -473,37 +473,38 @@ async function run(width, height, tag, cdp) {
   R['对比度 · 最低值'] = Math.min(...Object.values(contrast).filter((v) => typeof v === 'number'));
   R['对比度 · 明细'] = contrast;
 
-  /* --- 设计方向（浅色毛玻璃拟态）：防"风格被悄悄改回去"的护栏 --- */
-  R['风格 · 顶栏为浅色毛玻璃'] = await ev(`(() => {
+  /* --- 设计方向（纯白画布 · 极浅灰层级）：防"风格被悄悄改回去"的护栏 --- */
+  R['风格 · 顶栏为半透薄壳且带 blur'] = await ev(`(() => {
     const s = getComputedStyle(document.querySelector('.topbar'));
     const rgb = (s.backgroundColor.match(/[\\d.]+/g) || []).slice(0, 3).map(Number);
     const light = rgb.length === 3 && (rgb[0] + rgb[1] + rgb[2]) / 3 > 230;
     return light && (s.backdropFilter || s.webkitBackdropFilter || 'none') !== 'none'; })()`);
-  R['风格 · 面板是半透玻璃且带 blur'] = await ev(`(() => {
+  // 画布必须是干净的一张白纸：没有极光、没有颗粒，也不留伪元素
+  R['风格 · 画布纯白且无氛围层'] = await ev(`(() => {
+    const s = getComputedStyle(document.body);
+    const before = getComputedStyle(document.body, '::before').backgroundImage;
+    const after = getComputedStyle(document.body, '::after').backgroundImage;
+    return s.backgroundColor === 'rgb(255, 255, 255)' && before === 'none' && after === 'none'; })()`);
+  // 面板不再靠透明表达层级：实心白 + 一圈墨色描边 + 一道柔投影
+  R['风格 · 面板为实心白 + 描边 + 投影'] = await ev(`(() => {
     const s = getComputedStyle(document.querySelector('.pane'));
-    const parts = (s.backgroundColor.match(/[\\d.]+/g) || []).map(parseFloat);
-    const alpha = parts.length > 3 ? parts[3] : 1;
     const blurred = (s.backdropFilter || s.webkitBackdropFilter || 'none') !== 'none';
-    const sheen = s.boxShadow.includes('inset');   // 玻璃必须有上缘高光
-    return alpha < 1 && blurred && sheen; })()`);
-  // 氛围层是这套视觉的地面：极光 + 透过玻璃可见的噪点，两样都不能少
-  R['风格 · 极光氛围层在场'] = await ev(`(() => {
-    const base = getComputedStyle(document.body, '::before').backgroundImage || '';
-    const drift = getComputedStyle(document.body, '::after').backgroundImage || '';
-    return base.includes('radial-gradient') && base.includes('feTurbulence') && drift.includes('radial-gradient'); })()`);
-  // blur 是这套系统唯一有成本的属性：同屏层数超预算就说明有人给行/卡片加了糊
-  R['风格 · blur 层数在预算内'] = await ev(`(() => {
+    return s.backgroundColor === 'rgb(255, 255, 255)'
+      && s.borderTopColor.startsWith('rgba(16, 17, 19,')
+      && s.boxShadow !== 'none' && !blurred; })()`);
+  // blur 是这套系统唯一有成本的属性：内容不会从身后穿过的面一律不许糊
+  R['风格 · blur 只剩顶栏一处'] = await ev(`(() => {
     const n = Array.from(document.querySelectorAll('*')).filter((el) => {
       const s = getComputedStyle(el);
       return (s.backdropFilter || s.webkitBackdropFilter || 'none') !== 'none';
     }).length;
-    return n <= 5; })()`);
+    return n === 1; })()`);
   R['风格 · 导航底色'] = await ev(`getComputedStyle(document.querySelector('.topnav')).backgroundColor`);
   R['风格 · 当前项底色'] = await ev(`getComputedStyle(document.querySelector('.topnav button.active')).backgroundColor`);
   // 分段药丸导航只在 >720px 成立；≤720px 主动退回朴素条带（否则药丸轨道会被横向滚出可视区）
-  R[width > 720 ? '风格 · 分段药丸导航（玻璃轨道 + 白药丸当前项）' : '风格 · 窄屏导航退回朴素条带'] =
+  R[width > 720 ? '风格 · 分段药丸导航（灰轨道 + 白药丸当前项）' : '风格 · 窄屏导航退回朴素条带'] =
     width > 720
-      ? R['风格 · 导航底色'] !== 'rgba(0, 0, 0, 0)' && R['风格 · 当前项底色'].startsWith('rgba(255, 255, 255,')
+      ? R['风格 · 导航底色'] === 'rgb(237, 239, 243)' && R['风格 · 当前项底色'] === 'rgb(255, 255, 255)'
       : R['风格 · 导航底色'] === 'rgba(0, 0, 0, 0)';
 
   /* --- 降级动效 --- */

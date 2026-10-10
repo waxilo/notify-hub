@@ -1,19 +1,19 @@
 /* ==========================================================================
    Notify Hub 控制台 · 设计系统
-   方向：浅色毛玻璃拟态（Frosted Glass）× 单一家族排版
+   方向：纯白画布 · 极浅灰层级（Clean White）× 单一家族排版
    --------------------------------------------------------------------------
-   1 字体面 · 2 令牌层 · 3 基础层（极光画布）· 4 布局壳（含左右分栏）
+   1 字体面 · 2 令牌层 · 3 基础层（纯白画布）· 4 布局壳（含左右分栏）
    5 组件层 · 6 视图层 · 7 弹层 · 8 动效编排 · 9 响应式 · 10 降级
 
    三条纪律（详见仓库根目录 DESIGN.md）：
    ① 颜色 / 字号 / 间距 / 圆角 / 阴影 / 动效时长一律走令牌，组件里不写裸值；
    ② 强调色只有一支（信号橙），只出现在「当前态 / 焦点圈 / 关键数字」这类 10% 的位置；
-   ③ 层级靠「玻璃层数 + 亮边 + 上缘高光 + 冷调投影」表达，不靠底色深浅。
+   ③ 层级靠「白 → 极浅灰的面阶梯 + 墨色发丝线 + 柔投影」表达。
 
-   排版与间距这一版完全不动 —— 拟态只换材质，字阶 / 间距 / 布局契约保持「极简 · 精密」。
+   排版与间距这一版完全不动 —— 换底色不换骨架，字阶 / 间距 / 布局契约保持「极简 · 精密」。
 
-   性能预算：同屏 backdrop-filter 层 ≤ 3（顶栏 + 打开的弹层）。
-   面板内部的次级面只用 alpha 阶梯分层，绝不再套一层 blur。
+   性能预算：backdrop-filter 只剩两处 —— 顶栏（内容从它身后滚过）与模态遮罩。
+   贴在白底上的面板不糊：纯色背景后面没有东西可糊，blur 只剩开销。
 
    布局契约：控制台每个页面都是「左列表 / 右详情」两栏（.split.drill）。
    接入文档与账号没有"条目操作"，用 .split.flow（窄屏顺序堆叠，不做钻取）。
@@ -52,12 +52,12 @@
   --font-sans: "Instrument Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "PingFang SC", monospace;
 
-  /* 色 —— 画布是一片极光雾（见 3 基础层），结构全部交给玻璃阶梯承担 */
-  --paper: #eef1f6;          /* 页面底色（极光底下的那层冷白瓷） */
+  /* 色 —— 画布是纯白，层级全部交给「白 → 极浅灰」的面阶梯 */
+  --paper: #ffffff;          /* 页面底色：纯白 */
   --ink: #101113;            /* 近黑：主按钮、登录展示板 */
   --ink-2: #26282c;          /* 近黑悬停 */
   --text: #16181b;
-  --muted: #5c6169;          /* 正文级次要文字：玻璃上 5.6:1（比旧值加深，白雾会吃掉对比度） */
+  --muted: #5c6169;          /* 正文级次要文字：白底 6.4:1 */
   --muted-2: #787e87;        /* 占位符等非正文场景 */
   --accent: #ff5a1f;         /* 唯一强调色：焦点圈、当前态指示 */
   --accent-ink: #a83309;     /* 强调色的文字变体（小字对比度 ≥ 4.5:1） */
@@ -68,42 +68,39 @@
   --danger: #b3261e;
   --info: #3e4c63;
 
-  --line: rgba(16, 17, 19, .08);        /* 发丝线（玻璃之间的墨线分隔） */
-  --line-soft: rgba(16, 17, 19, .06);   /* 更淡的一档：行分隔 */
-  --line-strong: rgba(16, 17, 19, .14);
+  --line: rgba(16, 17, 19, .1);          /* 发丝线（白底上的面板描边就靠它） */
+  --line-soft: rgba(16, 17, 19, .06);    /* 更淡的一档：行分隔 */
+  --line-strong: rgba(16, 17, 19, .18);
 
-  /* 玻璃阶梯 —— 层级 = 不透明度，不是颜色深浅
-     g1 大面板 / g2 次级内嵌 / g3 抬起（输入、弹层）/ g4 选中与焦点 */
-  --g1: rgba(255, 255, 255, .46);
-  --g2: rgba(255, 255, 255, .40);
-  --g3: rgba(255, 255, 255, .72);
-  --g4: rgba(255, 255, 255, .88);
-  --g-shell: rgba(255, 255, 255, .58);   /* 顶栏这类贴内容的薄壳 */
-  --g-dark: rgba(16, 17, 19, .78);       /* 深色玻璃：吐司、登录展示板 */
+  /* 面阶梯 —— 层级 = 离白底有多远（越凹越灰、越抬越白），不是玻璃层数
+     g1 大面板 / g2 次级内嵌 / g3 抬起（按钮、弹层）/ g4 选中与焦点 */
+  --g1: #ffffff;
+  --g2: #f3f5f8;
+  --g3: #ffffff;
+  --g4: #ffffff;
+  --g-shell: rgba(255, 255, 255, .86);   /* 顶栏薄壳：唯一需要半透的贴内容面 */
+  --g-dark: #17181c;                     /* 实心深色：吐司、登录展示板 */
 
-  /* 面板**内部**的分层 —— 一律只用 alpha，绝不再叠一层 blur（玻璃糊玻璃会发灰掉帧）。
-     降级时这一组会被整体替换成实心色，所以组件里不许再写裸 rgba。 */
-  --g-band: rgba(255, 255, 255, .30);    /* 头栏 / 页签条这类内嵌带 */
-  --g-card: rgba(255, 255, 255, .46);    /* 卡片区 */
-  --g-card-h: rgba(255, 255, 255, .58);
-  --g-row: rgba(255, 255, 255, .42);     /* 行 / 页签 hover */
-  --g-row-on: rgba(255, 255, 255, .74);  /* 行选中（抬起） */
-  --g-input: rgba(255, 255, 255, .5);    /* 输入槽 */
-  --g-input-h: rgba(255, 255, 255, .66);
-  --g-input-on: rgba(255, 255, 255, .92);
-  --g-groove: rgba(16, 17, 19, .055);    /* 凹槽（分段控件、导航轨道） */
-  --g-inset: rgba(16, 17, 19, .045);     /* 暗槽（代码块） */
-  --g-veil: rgba(255, 255, 255, .22);    /* 空态这类"几乎看不见"的面 */
+  /* 面板**内部**的分层 —— 只用极浅灰浓淡表达凹陷与抬起，一律不 blur。 */
+  --g-band: #fafbfc;                     /* 头栏 / 页签条这类内嵌带 */
+  --g-card: #f8f9fb;                     /* 卡片区 */
+  --g-card-h: #f1f3f7;
+  --g-row: #f3f5f8;                      /* 行 / 页签 hover */
+  --g-row-on: #eaf0f8;                   /* 行选中（配左侧橙色指示轨） */
+  --g-input: #f7f8fa;                    /* 输入槽 */
+  --g-input-h: #f1f3f7;
+  --g-input-on: #ffffff;
+  --g-groove: #edeff3;                   /* 凹槽（分段控件、导航轨道） */
+  --g-inset: #f5f6f9;                    /* 暗槽（代码块） */
+  --g-veil: #fafbfc;                     /* 空态这类"几乎看不见"的面 */
 
-  /* 玻璃三件套：亮边 + 上缘镜面高光 + 冷紫底调投影（灰投影会让玻璃发脏） */
-  --glass-bd: rgba(255, 255, 255, .62);
-  --glass-bd-soft: rgba(255, 255, 255, .42);
-  --glass-bd-strong: rgba(255, 255, 255, .84);
-  --sheen: inset 0 1px 0 rgba(255, 255, 255, .78);
-  --sheen-soft: inset 0 1px 0 rgba(255, 255, 255, .6);
-  --sink: inset 0 1px 2px rgba(30, 27, 60, .06);   /* 凹陷（输入槽、代码槽、导航轨道） */
+  /* 微阴影：sheen 在浅灰面上留一道极淡顶光（表达"抬起"），
+     sink 表达凹槽 / 输入槽的凹陷。轮廓本身一律用 --line 系墨线。 */
+  --sheen: inset 0 1px 0 rgba(255, 255, 255, .9);
+  --sheen-soft: inset 0 1px 0 rgba(255, 255, 255, .7);
+  --sink: inset 0 1px 2px rgba(30, 27, 60, .07);
 
-  /* 深色玻璃上的对应物（登录展示板、吐司） */
+  /* 深色面上的对应物（登录展示板、吐司） */
   --g-on-dark: rgba(255, 255, 255, .12);
   --bd-on-dark: rgba(255, 255, 255, .18);
 
@@ -114,9 +111,10 @@
   --wash-ok-soft: rgba(10, 110, 78, .05);
   --ring-accent: 0 0 0 3px rgba(255, 90, 31, .16);
 
-  --blur-S: saturate(1.7) blur(16px);
-  --blur-M: saturate(1.8) blur(22px);
-  --blur-L: saturate(1.9) blur(28px);
+  /* 只剩两处需要糊：顶栏薄壳、模态遮罩 */
+  --blur-shell: saturate(1.6) blur(18px);
+  --blur-mask: blur(8px);
+  --mask: rgba(16, 17, 19, .42);
 
   /* 字阶（1.25 模数） */
   --fs-2xs: 10.5px;
@@ -137,11 +135,11 @@
   /* 圆角：比上一版整体放大一档 —— 玻璃要有厚度感 */
   --r-xs: 6px; --r-sm: 10px; --r-md: 14px; --r-lg: 18px; --r-xl: 26px; --r-pill: 999px;
 
-  /* 阴影三级：一律内嵌 sheen 起头，外投影取冷紫底调 */
-  --sh-1: var(--sheen), 0 1px 2px rgba(30, 27, 60, .05), 0 8px 22px -14px rgba(30, 27, 60, .18);
-  --sh-2: var(--sheen), 0 2px 4px rgba(30, 27, 60, .06), 0 18px 40px -18px rgba(30, 27, 60, .24);
-  --sh-3: inset 0 1px 0 rgba(255, 255, 255, .9), 0 2px 8px rgba(30, 27, 60, .10), 0 40px 72px -28px rgba(30, 27, 60, .36);
-  --sh-flat: 0 1px 2px rgba(16, 17, 19, .18);   /* 主按钮这类实心块用的普通投影 */
+  /* 阴影三级：白底上面板靠描边 + 柔投影立起来，投影要"将将看得见" */
+  --sh-1: var(--sheen), 0 1px 2px rgba(16, 17, 19, .06), 0 6px 16px -10px rgba(16, 17, 19, .14);
+  --sh-2: var(--sheen), 0 1px 3px rgba(16, 17, 19, .06), 0 14px 34px -18px rgba(16, 17, 19, .2);
+  --sh-3: 0 2px 8px rgba(16, 17, 19, .1), 0 32px 64px -24px rgba(16, 17, 19, .3);
+  --sh-flat: 0 1px 2px rgba(16, 17, 19, .18);   /* 实心近黑块（主按钮）用的普通投影 */
 
   /* 动效 */
   --ease-out: cubic-bezier(.16, 1, .3, 1);
@@ -168,34 +166,9 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* 氛围层：一整片固定的极光雾 + 极淡噪点，所有玻璃都浮在这层上。
-   噪点必须在玻璃**后面** —— 它是透过玻璃看见的颗粒，这才是"磨砂"的来源；
-   把噪点盖在内容上只会让字发糊。颗粒要"将将看得见"，重了就变成脏。
-   三束雾刻意压在内容区（分栏面板）背后，不然玻璃后面是纯色，糊不糊根本看不出来。 */
-body::before {
-  content: "";
-  position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.14'/%3E%3C/svg%3E"),
-    radial-gradient(760px 520px at 14% 8%, rgba(255, 90, 31, .28), transparent 62%),
-    radial-gradient(700px 480px at 88% 14%, rgba(91, 140, 255, .26), transparent 64%),
-    radial-gradient(820px 560px at 46% 58%, rgba(150, 120, 255, .1), transparent 66%),
-    radial-gradient(980px 620px at 72% 108%, rgba(58, 214, 176, .14), transparent 62%),
-    linear-gradient(180deg, #f3f5f9, #e7ebf3);
-  background-size: 180px 180px, auto, auto, auto, auto, auto;
-}
-/* 一束缓慢漂移的光：给静止的雾一点生气，也让滚动时玻璃后面有东西可糊。
-   只动 transform（合成层），不重绘渐变。 */
-body::after {
-  content: "";
-  position: fixed; left: 50%; top: 42%; width: 62vw; height: 62vw;
-  margin: -31vw 0 0 -31vw; z-index: 0; pointer-events: none;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 122, 60, .22), transparent 66%);
-  filter: blur(48px);
-  animation: drift 26s ease-in-out infinite alternate;
-}
-#app { position: relative; z-index: 2; }
+/* 画布就是纯白一块，没有氛围层：所有层级都由面阶梯 + 发丝线 + 投影在组件里表达。 */
+
+#app { position: relative; }
 
 h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; letter-spacing: -.015em; }
 p { margin: 0; }
@@ -216,15 +189,14 @@ img, svg { display: block; max-width: 100%; }
 main.shell { padding-bottom: var(--sp-7); }
 main > section[hidden] { display: none !important; }
 
-/* 顶栏：一片贴在内容上的薄玻璃 —— 滚动内容从它身后穿过时被糊掉，
-   这是整个拟态系统里最"值钱"的一层 blur，务必留在预算内。 */
+/* 顶栏：整站唯一需要半透 + 糊的地方 —— 页面滚动时内容从它身后穿过，
+   糊住的那一线才说明"内容在底下"。其余面板贴在白底上，糊了等于没糊。 */
 .topbar {
   position: sticky; top: 0; z-index: 60;
   background: var(--g-shell);
-  -webkit-backdrop-filter: var(--blur-M);
-  backdrop-filter: var(--blur-M);
-  border-bottom: 1px solid var(--glass-bd-soft);
-  box-shadow: 0 1px 0 rgba(16, 17, 19, .05), 0 12px 28px -20px rgba(30, 27, 60, .28);
+  -webkit-backdrop-filter: var(--blur-shell);
+  backdrop-filter: var(--blur-shell);
+  border-bottom: 1px solid var(--line);
 }
 .topbar .shell {
   display: flex; align-items: center; gap: var(--sp-4);
@@ -250,7 +222,7 @@ main > section[hidden] { display: none !important; }
   letter-spacing: .12em; text-transform: uppercase;
   color: var(--muted);
   background: var(--g2);
-  border: 1px solid var(--glass-bd-soft);
+  border: 1px solid var(--line-soft);
   border-radius: var(--r-pill);
   padding: 3px 8px 2px;
 }
@@ -345,15 +317,12 @@ main > section[hidden] { display: none !important; }
   gap: var(--sp-5);
   align-items: start;           /* 让左栏 sticky 生效（stretch 会撑满导致粘不住） */
 }
-/* 分栏面板 = 系统里的主玻璃层。亮边 + 上缘高光 + 冷调投影三件套齐全。
-   顶边那一道斜向白色渐变是"镜面反射"：没有它，一块半透明白只会显得像没加载完。 */
+/* 分栏面板 = 白底上的主容器：纯白面 + 一圈发丝描边 + 一道柔投影。
+   投影只负责"离开纸面"，轮廓主要由描边承担。 */
 .pane {
   min-width: 0;
   background: var(--g1);
-  background-image: linear-gradient(168deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 38%);
-  -webkit-backdrop-filter: var(--blur-M);
-  backdrop-filter: var(--blur-M);
-  border: 1px solid var(--glass-bd);
+  border: 1px solid var(--line);
   border-radius: var(--r-lg);
   box-shadow: var(--sh-2);
   overflow: hidden;             /* 圆角裁掉子元素直角 */
@@ -371,13 +340,13 @@ main > section[hidden] { display: none !important; }
 }
 .pane-list > .pane-body { flex: 1; min-height: 0; overflow: auto; padding: 0; }
 
-/* 头栏 / 页签条：面板内部的次级面 —— 只加 alpha，绝不再套一层 blur */
+/* 头栏 / 页签条：面板内部的次级面 —— 只用浅灰浓淡，不 blur */
 .pane-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-2); flex-wrap: wrap; flex: none;
   padding: 11px var(--sp-3) 11px var(--sp-4);
-  background: rgba(255, 255, 255, .30);
-  border-bottom: 1px solid var(--glass-bd-soft);
+  background: var(--g-band);
+  border-bottom: 1px solid var(--line-soft);
 }
 .pane-id { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
 /* 详情头部的主标题（条目名），过长时省略而不是折行压扁头部 */
@@ -407,7 +376,7 @@ main > section[hidden] { display: none !important; }
 .pane-tabs {
   display: flex; gap: var(--sp-1); flex: none;
   padding: 6px var(--sp-3) 0;
-  border-bottom: 1px solid var(--glass-bd-soft);
+  border-bottom: 1px solid var(--line-soft);
   background: var(--g-band);
 }
 .tab {
@@ -420,12 +389,12 @@ main > section[hidden] { display: none !important; }
               border-color var(--dur-1) ease;
 }
 .tab:hover { color: var(--text); background: var(--g-row); }
-/* 当前页签从玻璃里"浮起"，和顶栏药丸同一套语言；橙色短线保留作二次确认 */
+/* 当前页签从面板里"浮起"，和顶栏药丸同一套语言；橙色短线保留作二次确认 */
 .tab.on {
   color: var(--ink); font-weight: 600;
   background: var(--g4);
-  border-color: var(--glass-bd);
-  box-shadow: 0 -2px 8px -4px rgba(30, 27, 60, .18);
+  border-color: var(--line);
+  box-shadow: var(--sh-1);
 }
 .tab.on::after {
   content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
@@ -436,7 +405,7 @@ main > section[hidden] { display: none !important; }
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-3); flex-wrap: wrap;
   margin-top: var(--sp-5); padding-top: var(--sp-4);
-  border-top: 1px solid var(--glass-bd-soft);
+  border-top: 1px solid var(--line-soft);
 }
 
 /* --------------------------------------------------------------- 5 组件层 */
@@ -446,17 +415,18 @@ main > section[hidden] { display: none !important; }
 .card {
   position: relative;
   background: var(--g-card);
-  border: 1px solid var(--glass-bd-soft);
+  border: 1px solid var(--line-soft);
   border-radius: var(--r-md);
   padding: var(--sp-5);
-  box-shadow: var(--sheen-soft);
+  box-shadow: var(--sink);
   transition: background var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out),
               box-shadow var(--dur-2) var(--ease-out);
 }
 .card + .card, .stack > .card + * { margin-top: var(--sp-4); }
+/* 悬停时从"凹进去的灰槽"翻成"抬起来的白面"，与选中行同一套动作 */
 .card:hover {
-  background: var(--g-card-h);
-  border-color: var(--glass-bd);
+  background: var(--g1);
+  border-color: var(--line);
   box-shadow: var(--sh-1);
 }
 
@@ -475,12 +445,12 @@ main > section[hidden] { display: none !important; }
 }
 .card-foot {
   margin-top: var(--sp-4); padding-top: var(--sp-3);
-  border-top: 1px solid var(--glass-bd-soft); font-size: var(--fs-sm); color: var(--muted);
+  border-top: 1px solid var(--line-soft); font-size: var(--fs-sm); color: var(--muted);
 }
 /* 卡片内的次级区块（机器人详情下方的推送名单） */
 .card-sub {
   margin-top: var(--sp-5); padding-top: var(--sp-4);
-  border-top: 1px solid var(--glass-bd-soft);
+  border-top: 1px solid var(--line-soft);
 }
 .card-sub > .eyebrow { display: block; margin-bottom: var(--sp-3); color: var(--muted); }
 /* 卡内小节标签不属于「当前态 / 关键数字」，收掉橙色短线与强调色，避免强调色被稀释 */
@@ -498,12 +468,11 @@ main > section[hidden] { display: none !important; }
   transition: background var(--dur-1) ease, box-shadow var(--dur-2) var(--ease-out);
 }
 .item:last-child { border-bottom: 0; }
-.item:hover { background: rgba(255, 255, 255, .42); }
-/* 选中：这块玻璃真的"抬起来"一点（白度 + 高光 + 投影），不只换个底色 */
+.item:hover { background: var(--g-row); }
+/* 选中：浅一档的底 + 抬起投影 + 左侧实心指示轨，三重信号叠加 */
 .item.on {
   background: var(--g-row-on);
-  box-shadow: var(--sheen), inset 0 0 0 1px var(--glass-bd-soft),
-              0 6px 18px -12px rgba(30, 27, 60, .3);
+  box-shadow: var(--sh-1), inset 0 0 0 1px var(--line-soft);
 }
 /* 选中：左侧一条实心指示轨（状态不只靠明度差，弱视也分得清） */
 .item.on::before {
@@ -545,9 +514,9 @@ main > section[hidden] { display: none !important; }
 .btn {
   --btn-bg: var(--g3);
   --btn-fg: var(--text);
-  --btn-bd: var(--glass-bd);
+  --btn-bd: var(--line);
   --btn-bg-h: var(--g4);
-  --btn-bd-h: var(--glass-bd-strong);
+  --btn-bd-h: var(--line-strong);
   --btn-shadow: var(--sh-1);
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   min-height: 38px; padding: 0 15px;
@@ -580,7 +549,7 @@ main > section[hidden] { display: none !important; }
 .btn.primary.danger:hover { box-shadow: 0 8px 20px -8px rgba(179, 38, 30, .55), inset 0 1px 0 rgba(255, 255, 255, .2); }
 .btn.ghost {
   --btn-bg: transparent; --btn-bd: transparent; --btn-fg: var(--muted);
-  --btn-bg-h: var(--g-card-h); --btn-bd-h: var(--glass-bd-soft);
+  --btn-bg-h: var(--g-card-h); --btn-bd-h: var(--line-soft);
   --btn-shadow: none;
 }
 .btn.ghost:hover { --btn-fg: var(--text); }
@@ -628,7 +597,7 @@ input:not([type=checkbox]):not([type=radio]),
 select,
 textarea {
   width: 100%; min-height: 40px; padding: 9px 12px;
-  border: 1px solid var(--glass-bd); border-radius: var(--r-md);
+  border: 1px solid var(--line); border-radius: var(--r-md);
   background: var(--g-input); color: var(--text);
   box-shadow: var(--sink);
   font-family: inherit; font-size: var(--fs-md); line-height: 1.5;
@@ -636,7 +605,7 @@ textarea {
               box-shadow var(--dur-1) ease;
 }
 input:not([type=checkbox]):not([type=radio]):hover,
-select:hover, textarea:hover { background: var(--g-input-h); border-color: var(--glass-bd-strong); }
+select:hover, textarea:hover { background: var(--g-input-h); border-color: var(--line-strong); }
 input:not([type=checkbox]):not([type=radio]):focus,
 select:focus, textarea:focus {
   outline: none;
@@ -664,7 +633,7 @@ select { appearance: none; padding-right: 34px;
 .check input {
   appearance: none; -webkit-appearance: none; flex: none;
   width: 18px; height: 18px; margin: 2px 0 0; padding: 0; min-height: 0;
-  border: 1.5px solid var(--glass-bd-strong); border-radius: var(--r-xs);
+  border: 1.5px solid var(--line-strong); border-radius: var(--r-xs);
   background: var(--g-input); cursor: pointer; position: relative;
   box-shadow: var(--sink);
   transition: background var(--dur-1) ease, border-color var(--dur-1) ease;
@@ -718,7 +687,7 @@ select { appearance: none; padding-right: 34px;
 }
 
 /* ---- 折叠区 ---- */
-.adv { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--glass-bd-soft); }
+.adv { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
 .adv > summary {
   list-style: none; cursor: pointer; user-select: none;
   display: flex; align-items: center; gap: 7px;
@@ -736,7 +705,7 @@ select { appearance: none; padding-right: 34px;
 .bind-chip {
   display: inline-flex; align-items: center; gap: 6px;
   margin: 3px 5px 3px 0; padding: 3px 5px 3px 10px;
-  border: 1px solid var(--glass-bd); border-radius: var(--r-pill);
+  border: 1px solid var(--line); border-radius: var(--r-pill);
   background: var(--g-card-h);
   box-shadow: var(--sheen-soft);
   font-family: var(--font-mono); font-size: var(--fs-xs);
@@ -765,7 +734,7 @@ select { appearance: none; padding-right: 34px;
 code {
   font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text);
   background: var(--g-card-h);
-  border: 1px solid var(--glass-bd-soft);
+  border: 1px solid var(--line-soft);
   border-radius: var(--r-xs);
   padding: 2px 6px; word-break: break-all;
 }
@@ -783,7 +752,7 @@ code {
 /* ---- 提示条：一块带方向感的彩色玻璃，左边实心橙轨做状态锚点 ---- */
 .alert {
   position: relative; margin: var(--sp-3) 0; padding: var(--sp-4) var(--sp-4) var(--sp-4) 18px;
-  border: 1px solid var(--glass-bd); border-radius: var(--r-md);
+  border: 1px solid var(--line); border-radius: var(--r-md);
   background: linear-gradient(90deg, var(--wash-accent), var(--wash-accent-soft));
   box-shadow: var(--sheen-soft);
   font-size: var(--fs-md); line-height: 1.9;
@@ -801,7 +770,7 @@ code {
 .empty {
   display: flex; flex-direction: column; align-items: center; gap: var(--sp-3);
   padding: var(--sp-6) var(--sp-5);
-  border: 1px dashed var(--glass-bd-strong); border-radius: var(--r-md);
+  border: 1px dashed var(--line-strong); border-radius: var(--r-md);
   background: var(--g-veil);
   box-shadow: var(--sheen-soft);
   color: var(--muted); font-size: var(--fs-sm); text-align: center;
@@ -891,17 +860,14 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 
 /* --------------------------------------------------------------- 6 视图层 */
 
-/* ---- 登录 / 注册：非对称双栏，左深色玻璃展示板 / 右玻璃卡 ---- */
+/* ---- 登录 / 注册：非对称双栏，左实心墨色展示板 / 右白卡 ---- */
 .auth { display: grid; grid-template-columns: 1.12fr .88fr; min-height: 100vh; }
 .auth-art {
   position: relative; overflow: hidden;
   display: flex; flex-direction: column; justify-content: space-between;
   padding: var(--sp-7) var(--sp-6);
   background: var(--g-dark);
-  -webkit-backdrop-filter: var(--blur-L);
-  backdrop-filter: var(--blur-L);
   color: #fff;
-  border-right: 1px solid var(--bd-on-dark);
 }
 /* 深色板上的两张氛围层：一层很淡的网格（交代"接口/信号"的语感），
    一层橙色光雾（画面重心） */
@@ -964,14 +930,12 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 }
 
 .auth-panel { display: flex; align-items: center; justify-content: center; padding: var(--sp-6) var(--sp-5); }
-/* 右栏表单坐进一块抬起的厚玻璃：登录页没有顶栏抢 blur 预算，这块可以给足 */
+/* 右栏表单坐进一块抬起来的白卡：白底上纯靠描边 + 投影立层级 */
 .auth-box {
   width: 100%; max-width: 372px;
   padding: var(--sp-5);
   background: var(--g1);
-  -webkit-backdrop-filter: var(--blur-L);
-  backdrop-filter: var(--blur-L);
-  border: 1px solid var(--glass-bd);
+  border: 1px solid var(--line);
   border-radius: var(--r-xl);
   box-shadow: var(--sh-2);
   animation: riseIn var(--dur-2) var(--ease-out) both;
@@ -984,7 +948,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 .auth-box form .btn.block { margin-top: var(--sp-2); }
 .auth-note {
   margin-top: var(--sp-5); padding-top: var(--sp-4);
-  border-top: 1px solid var(--glass-bd-soft); font-size: var(--fs-xs); color: var(--muted); line-height: 1.8;
+  border-top: 1px solid var(--line-soft); font-size: var(--fs-xs); color: var(--muted); line-height: 1.8;
 }
 .auth-back { margin-top: var(--sp-5); font-size: var(--fs-sm); }
 
@@ -993,7 +957,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
    不能浮在代码上 —— 长行要横向滚动，浮层按钮会一直压住正文。 */
 .doc-block {
   position: relative; margin: var(--sp-3) 0 var(--sp-4);
-  border: 1px solid var(--glass-bd); border-radius: var(--r-md);
+  border: 1px solid var(--line); border-radius: var(--r-md);
   overflow: hidden;
   background: var(--g-inset);
   box-shadow: var(--sink);
@@ -1002,7 +966,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
   display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
   padding: 7px 8px 7px var(--sp-4);
   background: var(--g-row);
-  border-bottom: 1px solid var(--glass-bd-soft);
+  border-bottom: 1px solid var(--line-soft);
 }
 .doc-label {
   font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 500;
@@ -1028,15 +992,13 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 }
 .kv dd { margin: 0; word-break: break-all; }
 
-/* ---- 历史原始载荷悬浮面板：一层抬起的厚玻璃（会占用 blur 预算，同屏只允许一个） ---- */
+/* ---- 历史原始载荷悬浮面板：抬起的实心白面（同屏只允许一个） ---- */
 .raw-pop {
   position: fixed; z-index: 900; overflow: auto;
   max-width: min(420px, calc(100vw - 24px));
   padding: var(--sp-3) 14px;
-  border: 1px solid var(--glass-bd); border-radius: var(--r-md);
+  border: 1px solid var(--line); border-radius: var(--r-md);
   background: var(--g3);
-  -webkit-backdrop-filter: var(--blur-L);
-  backdrop-filter: var(--blur-L);
   color: var(--text);
   box-shadow: var(--sh-3);
   font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.7;
@@ -1045,7 +1007,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 .raw-pop .raw-pop-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin-bottom: var(--sp-2); padding-bottom: var(--sp-2);
-  border-bottom: 1px solid var(--glass-bd-soft);
+  border-bottom: 1px solid var(--line-soft);
   color: var(--ink); font-weight: 600;
 }
 .raw-pop pre {
@@ -1069,20 +1031,20 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
   animation: barSweep 1.15s linear infinite;
 }
 
-/* 遮罩把整页糊成一张磨砂背景，模态再抬起来 —— 这两层共用一次 blur 预算 */
+/* 遮罩把整页糊成一张磨砂背景，模态再抬起来 —— 这是第二处、也是最后一处 blur */
 .modal-mask {
   position: fixed; inset: 0; z-index: 100; display: flex;
   align-items: center; justify-content: center; padding: var(--sp-4);
-  background: rgba(24, 22, 40, .42);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  background: var(--mask);
+  -webkit-backdrop-filter: var(--blur-mask);
+  backdrop-filter: var(--blur-mask);
   animation: maskIn var(--dur-2) var(--ease-out) both;
 }
 .modal {
   position: relative; width: 100%; max-width: 440px; margin: 0;
   max-height: 88vh; overflow: auto; overscroll-behavior: contain;
   padding: var(--sp-5);
-  background: var(--g3); border: 1px solid var(--glass-bd);
+  background: var(--g3); border: 1px solid var(--line);
   border-radius: var(--r-xl); box-shadow: var(--sh-3);
   animation: panelIn var(--dur-2) var(--ease-out) both;
 }
@@ -1093,7 +1055,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 }
 .modal-actions[hidden] { display: none; }
 
-/* 吐司：深色玻璃浮在浅色页面上 —— 明度反转，一眼可见但不抢内容 */
+/* 吐司：实心墨块浮在纯白页面上 —— 明度反转，一眼可见但不抢内容 */
 .toasts {
   position: fixed; right: var(--sp-5); bottom: var(--sp-5); z-index: 200;
   display: flex; flex-direction: column; gap: 10px; pointer-events: none;
@@ -1104,10 +1066,7 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
   min-width: 232px; max-width: min(380px, calc(100vw - 40px));
   padding: var(--sp-3) var(--sp-4) var(--sp-3) 18px;
   border-radius: var(--r-md); background: var(--g-dark); color: #fff;
-  -webkit-backdrop-filter: var(--blur-S);
-  backdrop-filter: var(--blur-S);
-  border: 1px solid var(--bd-on-dark);
-  box-shadow: 0 2px 8px rgba(30, 27, 60, .12), 0 32px 56px -24px rgba(30, 27, 60, .44);
+  box-shadow: var(--sh-3);
   font-size: var(--fs-md); line-height: 1.6;
   pointer-events: auto;
   animation: toastIn var(--dur-2) var(--ease-out) both;
@@ -1136,9 +1095,6 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 @keyframes lampPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 @keyframes breathe { 0%, 100% { opacity: .78; transform: scale(1); } 50% { opacity: 1; transform: scale(1.07); } }
 @keyframes skShift { from { background-position: 100% 0; } to { background-position: -100% 0; } }
-/* 极光漂移：只走 transform，合成层重排成本为零 */
-@keyframes drift { from { transform: translate3d(-14vw, -6vh, 0) scale(1); } to { transform: translate3d(16vw, 10vh, 0) scale(1.18); } }
-
 /* 全局降级：关掉一切动效，同时保证入场元素停在终态 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1148,7 +1104,6 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
     scroll-behavior: auto !important;
   }
   .sk { background: var(--g-card-h); }
-  body::after { display: none; }
 }
 
 /* --------------------------------------------------------- 9 响应式 */
@@ -1175,8 +1130,8 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
 }
 
 @media (max-width: 720px) {
-  /* 移动端模糊半径整体降一档：低端 GPU 上大 blur 滚动会抖 */
-  :root { --blur-M: var(--blur-S); --blur-L: var(--blur-S); }
+  /* 移动端顶栏的糊降到最轻：低端 GPU 上大 blur 滚动会抖 */
+  :root { --blur-shell: blur(10px); }
   /* 顶栏折成两行：第一行「品牌 + 退出」（退出固定可见），第二行是可横向滑动的页签条带。
      条带在这个宽度下退回"朴素文字"，免得药丸轨道被滚出可视区。 */
   .topbar .shell { flex-wrap: wrap; gap: 0; min-height: 0; padding: 10px var(--sp-4) 0; }
@@ -1224,45 +1179,22 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; whit
   .tab { padding-top: 15px; padding-bottom: 13px; }
 }
 
-/* ---------------------------------------------------- 10 无玻璃降级 */
+/* ---------------------------------------------------- 10 无模糊降级 */
 /* 两条路都要走：① 浏览器不支持 backdrop-filter；② 用户在系统里关了透明度
-   （prefers-reduced-transparency）。降级只换材质，布局一个像素都不动。
-   sheen / sink 这几个内阴影令牌被组件用逗号串在 box-shadow 里，
-   不能设成 none（`box-shadow: none, 0 1px 2px` 非法），所以要给一个"看不见的 0 值"。 */
+   （prefers-reduced-transparency）。这一版面阶梯本来就是实心的，所以只剩
+   顶栏薄壳与模态遮罩这两处需要处理：换成实心面、关掉 blur，布局一个像素都不动。 */
 @supports not (backdrop-filter: blur(1px)) {
   :root {
-    --blur-S: none; --blur-M: none; --blur-L: none;
-    --g1: #fdfdff; --g2: #f6f7fa; --g3: #ffffff; --g4: #ffffff;
-    --g-shell: #fbfcfe; --g-dark: #17181c;
-    --g-band: #f5f6f9; --g-card: #fbfcfe; --g-card-h: #f3f5f8;
-    --g-row: #f1f3f7; --g-row-on: #e9eef6; --g-veil: #f6f7fa;
-    --g-input: #ffffff; --g-input-h: #ffffff; --g-input-on: #ffffff;
-    --g-inset: #f3f4f7;
-    --glass-bd: var(--line); --glass-bd-soft: var(--line-soft); --glass-bd-strong: var(--line-strong);
-    --bd-on-dark: rgba(255, 255, 255, .16); --g-on-dark: rgba(255, 255, 255, .1);
-    --sheen: 0 0 0 0 transparent; --sheen-soft: 0 0 0 0 transparent; --sink: 0 0 0 0 transparent;
-    --sh-1: var(--sh-flat); --sh-2: 0 2px 10px -4px rgba(30, 27, 60, .16);
-    --sh-3: 0 16px 40px -12px rgba(30, 27, 60, .26);
+    --blur-shell: none; --blur-mask: none;
+    --g-shell: #ffffff;
+    --mask: rgba(16, 17, 19, .55);
   }
-  body::after { display: none; }
 }
 
 @media (prefers-reduced-transparency: reduce) {
   :root {
-    --blur-S: none; --blur-M: none; --blur-L: none;
-    --g1: #fdfdff; --g2: #f6f7fa; --g3: #ffffff; --g4: #ffffff;
-    --g-shell: #fbfcfe; --g-dark: #17181c;
-    --g-band: #f5f6f9; --g-card: #fbfcfe; --g-card-h: #f3f5f8;
-    --g-row: #f1f3f7; --g-row-on: #e9eef6; --g-veil: #f6f7fa;
-    --g-input: #ffffff; --g-input-h: #ffffff; --g-input-on: #ffffff;
-    --g-inset: #f3f4f7;
-    --glass-bd: var(--line); --glass-bd-soft: var(--line-soft); --glass-bd-strong: var(--line-strong);
-    --bd-on-dark: rgba(255, 255, 255, .16); --g-on-dark: rgba(255, 255, 255, .1);
-    --sheen: 0 0 0 0 transparent; --sheen-soft: 0 0 0 0 transparent; --sink: 0 0 0 0 transparent;
-    --sh-1: var(--sh-flat); --sh-2: 0 2px 10px -4px rgba(30, 27, 60, .16);
-    --sh-3: 0 16px 40px -12px rgba(30, 27, 60, .26);
+    --blur-shell: none; --blur-mask: none;
+    --g-shell: #ffffff;
+    --mask: rgba(16, 17, 19, .62);   /* 关透明度时遮罩也不能糊，改用实心暗面 */
   }
-  body::after { display: none; }
-  /* 遮罩在"关透明度"偏好下也不能糊，改用实心暗面 */
-  .modal-mask { background: rgba(24, 22, 40, .72); backdrop-filter: none; }
 }
